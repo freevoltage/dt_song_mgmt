@@ -16,7 +16,8 @@ def get_project_state(prj: Path) -> dict:
     from .project import payload_name
     return {
         "project_name": payload_name(manifest),
-        "device": device_name(raw),
+        "project_file": prj.name,
+        "device": device_name(raw, prj.suffix),
         "songs": songs,
         "patterns": patterns,
     }
@@ -75,5 +76,9 @@ def apply_operations(raw: bytes, operations: list[dict]) -> bytes:
             slot = op["slot"]
             from .songs import clear_song
             slots[slot] = clear_song(slots[slot], raw)
+        elif op_type == "empty_song":
+            slot = op["slot"]
+            from .songs import empty_song_template, song_table_off
+            slots[slot] = empty_song_template(raw, song_table_off(raw))
     from .songs import set_song_slots
     return set_song_slots(raw, slots)

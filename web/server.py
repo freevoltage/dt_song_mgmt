@@ -6,10 +6,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 import json
 import shutil
+import base64
+from urllib.parse import quote
 
 from ..patterns import get_all_patterns_info, rename_pattern, copy_pattern_block, clear_pattern, swap_patterns, move_pattern, retarget_all_pattern_refs
 from ..project import pack_project, read_project, unpack_project, payload_name
-from ..songs import get_song_slots, get_song_info, collect_pattern_names, SONG_SLOTS
+from ..songs import get_song_slots, get_song_info, get_all_songs_info, collect_pattern_names, song_name, SONG_SLOTS, SONG_SIZE
 from ..state import apply_operations, get_project_state
 
 
@@ -63,6 +65,24 @@ def create_handler(prj: Path):
                     self._send_json({'patterns': patterns})
                 except Exception as e:
                     self._send_json({'error': str(e)}, 500)
+            elif parsed.path.startswith('/api/songs/') and parsed.path.endswith('/export'):
+                try:
+                    slot = int(parsed.path.split('/')[-2])
+                    if not 0 <= slot < SONG_SLOTS:
+                        raise ValueError('invalid song slot')
+                    _manifest, payload, _ = read_project(prj)
+                    _head, raw = unpack_project(payload)
+                    rec = get_song_slots(raw)[slot]
+                    filename = f"{slot:02d}_{song_name(rec)}.bin"
+                    safe_filename = quote(filename, safe='')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/octet-stream')
+                    self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{safe_filename}")
+                    self.send_header('Content-Length', str(len(rec)))
+                    self.end_headers()
+                    self.wfile.write(rec)
+                except Exception as e:
+                    self._send_json({'error': str(e)}, 400)
             else:
                 self.send_error(404)
 
@@ -77,6 +97,7 @@ def create_handler(prj: Path):
                     manifest, payload, members = read_project(prj)
                     head, raw = unpack_project(payload)
                     try:
+                        old_songs = get_all_songs_info(raw)
                         new_raw = apply_operations(raw, ops)
                         pattern_names = collect_pattern_names(new_raw)
                         slots = get_song_slots(new_raw)
@@ -86,7 +107,24 @@ def create_handler(prj: Path):
                             info['slot'] = i
                             songs.append(info)
                         patterns = get_all_patterns_info(new_raw)
-                        self._send_json({'ok': True, 'songs': songs, 'patterns': patterns})
+                        changes = []
+                        for old, new in zip(old_songs, songs):
+                            if old == new:
+                                continue
+                            changes.append({
+                                'slot': old['slot'],
+                                'name_old': old['name'],
+                                'name_new': new['name'],
+                                'rows_old': old['row_count'],
+                                'rows_new': new['row_count'],
+                                'rows': [
+                                    {'index': i, 'before': old['rows'][i] if i < len(old['rows']) else None,
+                                     'after': new['rows'][i] if i < len(new['rows']) else None}
+                                    for i in range(max(len(old['rows']), len(new['rows'])))
+                                    if i >= len(old['rows']) or i >= len(new['rows']) or old['rows'][i] != new['rows'][i]
+                                ],
+                            })
+                        self._send_json({'ok': True, 'changes': changes, 'songs': songs, 'patterns': patterns})
                     except Exception as e:
                         self._send_json({'error': str(e)}, 500)
                 except Exception as e:
@@ -105,7 +143,7 @@ def create_handler(prj: Path):
                     from ..project import write_project
                     write_project(prj, members, pname, new_payload)
                     state = get_project_state(prj)
-                    self._send_json({'ok': True, 'backup': str(bak), 'state': state})
+                    self._send_json({'ok': True, 'success': True, 'backup': str(bak), 'state': state})
                 except Exception as e:
                     self._send_json({'error': str(e)}, 500)
             elif parsed.path == '/api/patterns/rename':
@@ -236,6 +274,29 @@ def create_handler(prj: Path):
                     self._send_json({'success': True, 'backup': str(bak)})
                 except Exception as e:
                     self._send_json({'error': str(e)}, 500)
+            elif parsed.path == '/api/import-song-file':
+                try:
+                    data = json.loads(body)
+                    dst_slot = int(data['dst_slot'])
+                    song_data = base64.b64decode(data['song_data'], validate=True)
+                    if not 0 <= dst_slot < SONG_SLOTS:
+                        raise ValueError('invalid target slot')
+                    if len(song_data) != SONG_SIZE:
+                        raise ValueError(f'song backup must be exactly {SONG_SIZE} bytes')
+                    manifest, payload, members = read_project(prj)
+                    pname = payload_name(manifest)
+                    head, raw = unpack_project(payload)
+                    slots = get_song_slots(raw)
+                    slots[dst_slot] = song_data
+                    from ..songs import set_song_slots
+                    new_payload = pack_project(head, set_song_slots(raw, slots))
+                    bak = prj.with_suffix(prj.suffix + '.bak')
+                    shutil.copy2(prj, bak)
+                    from ..project import write_project
+                    write_project(prj, members, pname, new_payload)
+                    self._send_json({'success': True, 'backup': str(bak)})
+                except Exception as e:
+                    self._send_json({'error': str(e)}, 400)
             elif parsed.path == '/api/list-project-songs':
                 try:
                     data = json.loads(body)
@@ -243,7 +304,8 @@ def create_handler(prj: Path):
                     sman, spayload, _ = read_project(src_path)
                     shead, sraw = unpack_project(spayload)
                     info = get_all_songs_info(sraw)
-                    self._send_json({'songs': info})
+                    from ..constants import device_name
+                    self._send_json({'songs': info, 'device': device_name(sraw, src_path.suffix), 'project_file': src_path.name})
                 except Exception as e:
                     self._send_json({'error': str(e)}, 500)
             else:

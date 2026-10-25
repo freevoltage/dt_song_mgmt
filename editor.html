@@ -26,7 +26,8 @@
             z-index: 50;
         }
         h1 { font-size: 12px; font-weight: 650; }
-        .project-name { color: #8c8c8c; font-size: 11px; }
+        .project-name { color: #c5c5c5; font-size: 11px; }
+        .device-badge { color: #d4652f; border: 1px solid #6d3a20; padding: 2px 6px; white-space: nowrap; }
         .header-actions { margin-left: auto; display: flex; gap: 6px; }
         button {
             background: #1a1a1a;
@@ -229,6 +230,8 @@
             text-align: left;
         }
         .pattern-drop.dragover { border-color: #d4652f; background: #251a12; }
+        .row-pattern-select { min-width: 135px; max-width: 210px; background: #151515; border: 1px solid #2a2a2a; color: #e6e6e6; padding: 3px 4px; font: 10px ui-monospace, monospace; }
+        .row-pattern-select:focus { border-color: #d4652f; outline: none; }
         .num-input {
             background: #0f0f0f;
             color: #e6e6e6;
@@ -346,6 +349,7 @@
     <header>
         <h1 id="appTitle">Song Editor</h1>
         <span class="project-name" id="projectName"></span>
+            <span class="device-badge" id="deviceName"></span>
         <div class="header-actions">
             <button id="togglePatternBtn" onclick="togglePatternPanel()">Hide Patterns</button>
             <button onclick="undo()" id="undoBtn" disabled>Undo</button>
@@ -353,6 +357,8 @@
             <button onclick="exportArrangement()">Export JSON</button>
             <button onclick="importArrangement()">Import JSON</button>
             <button onclick="showImportSong()">Import Song from Project</button>
+            <button onclick="importSongBackup()">Import Song Backup</button>
+            <input id="songBackupFile" type="file" accept=".bin,application/octet-stream" hidden onchange="restoreSongBackup(event)">
             <button onclick="showHelp()">HELP</button>
             <button onclick="reload()">Reload</button>
             <button onclick="previewChanges()">Preview Changes</button>
@@ -500,7 +506,10 @@
             const deviceTitle = device === 'DN2' ? 'Digitone II Song Editor' : 'Digitakt II Song Editor';
             document.title = deviceTitle;
             document.getElementById('appTitle').textContent = deviceTitle;
-            document.getElementById('projectName').textContent = state.project_name;
+            const projectFile = state.project_file || state.project_name || 'Project';
+            document.getElementById('projectName').textContent = projectFile;
+            document.getElementById('projectName').title = `Internal project name: ${state.project_name || ''}`;
+            document.getElementById('deviceName').textContent = device === 'DN2' ? 'Digitone II' : 'Digitakt II';
             
             // Bulk pattern select
             const bulkPatSel = document.getElementById('bulkPatternSelect');
@@ -524,7 +533,9 @@
                         <span class="song-meta">${song.row_count} rows${song.default_bpm ? ' · ' + song.default_bpm + ' BPM' : ''}</span>
                         <div class="song-actions">
                             <button onclick="selectAllInSong(${song.slot})">Select All</button>
+                            <button onclick="exportSong(${song.slot})">Export .bin</button>
                             <button onclick="clearSong(${song.slot})">Clear</button>
+                            <button onclick="emptySong(${song.slot})">Empty Slot</button>
                         </div>
                     </div>
                     <table class="rows-table" id="rows-${song.slot}">
@@ -550,7 +561,9 @@
                         <td class="drag-handle">⋮⋮</td>
                         <td><input type="checkbox" class="row-checkbox" data-key="${key}" ${selectedRows.has(key) ? 'checked' : ''} onclick="toggleRowSelection(event, ${song.slot}, ${idx})"></td>
                         <td class="row-idx">${idx+1}</td>
-                        <td><button class="pattern-drop" draggable="false" ondragover="rowDragOver(event)" ondrop="rowDrop(event, ${song.slot}, ${idx})" title="${pat ? pat.name : ''}">${pat ? pat.label + (pat.name && pat.name !== pat.label ? ' · ' + pat.name.substring(0,12) : '') : row.pattern_label}</button></td>
+                        <td><select class="pattern-drop row-pattern-select" onchange="changePattern(${song.slot}, ${idx}, this.value)" ondragover="rowDragOver(event)" ondrop="rowDrop(event, ${song.slot}, ${idx})" aria-label="Pattern for ${escapeHtml(song.name)} row ${idx + 1}">
+                            ${patterns.map(p => `<option value="${p.index}" ${p.index === row.pattern ? 'selected' : ''}>${p.label}${p.name && p.name !== p.label ? ' · ' + escapeHtml(p.name) : ''}</option>`).join('')}
+                        </select></td>
                         <td><input class="num-input" type="number" value="${row.repeat}" min="1" max="99" onchange="updateRowField(${song.slot}, ${idx}, 'repeat', this.value)"></td>
                         <td><input class="num-input" type="number" value="${row.bpm_raw === 0 ? '' : Math.round(row.bpm_raw/120)}" placeholder="inh" onchange="updateRowFieldBpm(${song.slot}, ${idx}, this.value)"></td>
                         <td><input class="num-input" type="number" value="${row.length}" min="1" max="1024" onchange="updateRowField(${song.slot}, ${idx}, 'length', this.value)"></td>
@@ -824,8 +837,17 @@
         }
         
         function changePattern(slot, rowIdx, patternIdx) {
-            operations.push({type: 'retarget', slot: slot, rows: [rowIdx], to_pattern: parseInt(patternIdx)});
+            patternIdx = parseInt(patternIdx);
+            if (!Number.isInteger(patternIdx) || patternIdx < 0 || patternIdx >= 128) return;
+            const song = state.songs.find(item => item.slot === slot);
+            if (!song || !song.rows[rowIdx] || song.rows[rowIdx].pattern === patternIdx) return;
+            undoStack.push(JSON.parse(JSON.stringify(operations)));
+            redoStack = [];
+            operations.push({type: 'retarget', slot: slot, rows: [rowIdx], to_pattern: patternIdx});
+            song.rows[rowIdx].pattern = patternIdx;
             document.getElementById('applyBtn').disabled = false;
+            updateUndoRedo();
+            render();
         }
         function updateRowField(slot, rowIdx, field, value) {
             if (value === '') return;
@@ -857,16 +879,38 @@
                 document.getElementById('applyBtn').disabled = false;
             }
         }
+        function emptySong(slot) {
+            const song = state.songs.find(s => s.slot === slot);
+            if (!confirm(`Empty slot ${String(slot).padStart(2,'0')} (${song ? song.name : ''})? This clears the song name and rows. Export a .bin backup first if you may want it later.`)) return;
+            operations.push({type: 'empty_song', slot: slot});
+            document.getElementById('applyBtn').disabled = false;
+            render();
+        }
         
         async function previewChanges() {
-            const res = await fetch('/api/preview', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({operations: operations})});
-            const data = await res.json();
-            const panel = document.getElementById('diffPanel');
             const content = document.getElementById('diffContent');
-            content.innerHTML = '';
-            if (!data.changes || data.changes.length === 0) content.innerHTML = '<div class="diff-item">No changes</div>';
-            else data.changes.forEach(c => { content.innerHTML += `<div class="diff-item">Slot ${c.slot.toString().padStart(2,'0')} '${escapeHtml(c.name_old)}' (${c.rows_old} rows) → '${escapeHtml(c.name_new)}' (${c.rows_new} rows)</div>`; });
-            panel.classList.add('active');
+            content.innerHTML = '<div class="diff-item">Calculating preview…</div>';
+            document.getElementById('diffPanel').classList.add('active');
+            try {
+                const res = await fetch('/api/preview', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({operations: operations})});
+                const data = await res.json();
+                if (!res.ok || data.error) throw new Error(data.error || `Preview failed (${res.status})`);
+                if (!data.changes || data.changes.length === 0) {
+                    content.innerHTML = '<div class="diff-item">No changes to preview.</div>';
+                    return;
+                }
+                content.innerHTML = data.changes.map(c => {
+                    const heading = `<div class="diff-item"><strong>Slot ${String(c.slot).padStart(2,'0')}</strong>: '${escapeHtml(c.name_old)}' (${c.rows_old} rows) → '${escapeHtml(c.name_new)}' (${c.rows_new} rows)</div>`;
+                    const details = c.rows.map(r => {
+                        const before = r.before ? `${r.before.pattern_name} · repeat ${r.before.repeat} · length ${r.before.length}` : 'empty';
+                        const after = r.after ? `${r.after.pattern_name} · repeat ${r.after.repeat} · length ${r.after.length}` : 'empty';
+                        return `<div class="diff-item">Row ${r.index + 1}: ${escapeHtml(before)} → ${escapeHtml(after)}</div>`;
+                    }).join('');
+                    return heading + details;
+                }).join('');
+            } catch (err) {
+                content.innerHTML = `<div class="diff-item">Preview error: ${escapeHtml(err.message)}</div>`;
+            }
         }
         function hideDiff() { document.getElementById('diffPanel').classList.remove('active'); }
         
@@ -874,7 +918,7 @@
             if (!confirm('Apply changes to project file? A backup will be created.')) return;
             const res = await fetch('/api/apply', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({operations: operations})});
             const data = await res.json();
-            if (data.success) {
+            if (data.ok || data.success) {
                 alert('Changes applied successfully! Backup: ' + data.backup);
                 operations = []; selectedRows.clear(); document.getElementById('applyBtn').disabled = true; hideDiff();
                 await loadState();
@@ -940,9 +984,51 @@
             input.click();
         }
         let importSongState = {srcPath: '', songs: [], srcSlot: null, dstSlot: null};
+        async function exportSong(slot) {
+            if (operations.length) { alert('Apply or discard pending changes before exporting a song backup.'); return; }
+            try {
+                const res = await fetch(`/api/songs/${slot}/export`);
+                if (!res.ok) throw new Error((await res.json()).error || `Export failed (${res.status})`);
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+                const filename = encodedName ? decodeURIComponent(encodedName[1]) : `song-${String(slot).padStart(2,'0')}.bin`;
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = filename; a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (err) { alert(`Could not export song: ${err.message}`); }
+        }
+        function importSongBackup() {
+            if (operations.length) { alert('Apply or discard pending changes before restoring a song backup.'); return; }
+            document.getElementById('songBackupFile').click();
+        }
+        async function restoreSongBackup(event) {
+            const file = event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+            const match = file.name.match(/^(\d{2})_/);
+            const suggested = match ? Number(match[1]) : 0;
+            const target = prompt(`Restore ${file.name} into which song slot? (0–15)`, String(suggested));
+            if (target === null) return;
+            const dst = Number(target);
+            if (!Number.isInteger(dst) || dst < 0 || dst >= 16) { alert('Enter a slot number from 0 to 15.'); return; }
+            if (!confirm(`Restore song backup to slot ${String(dst).padStart(2,'0')}? This replaces that song only; current project patterns stay unchanged. A backup will be created.`)) return;
+            try {
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                let binary = '';
+                bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+                const res = await fetch('/api/import-song-file', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({dst_slot: dst, song_data: btoa(binary)})});
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Restore failed');
+                alert(`Song restored. Current patterns were kept. Backup: ${data.backup}`);
+                await loadState();
+            } catch (err) { alert(`Could not restore song: ${err.message}`); }
+        }
         function showImportSong() {
             const modal = document.getElementById('importSongModal');
             document.getElementById('importSrcPath').value = '';
+            document.getElementById('importSourceInfo').textContent = '';
             document.getElementById('importSrcSongs').innerHTML = '<div style="color:#666">Load a project first</div>';
             document.getElementById('importDstSlot').innerHTML = '';
             if (state && state.songs) {
@@ -961,12 +1047,15 @@
         }
         async function loadImportSource() {
             const path = document.getElementById('importSrcPath').value.trim();
-            if (!path) { alert('Enter path to source .dt2prj'); return; }
+            if (!path) { alert('Enter path to source .dt2prj or .dn2prj'); return; }
             importSongState.srcPath = path;
             try {
                 const res = await fetch('/api/list-project-songs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({src_path: path})});
                 const data = await res.json();
                 if (data.error) { alert(data.error); return; }
+                importSongState.srcDevice = data.device;
+                const sourceDevice = data.device === 'DN2' ? 'Digitone II' : 'Digitakt II';
+                document.getElementById('importSourceInfo').textContent = `${data.project_file} · ${sourceDevice}`;
                 importSongState.songs = data.songs || [];
                 const list = document.getElementById('importSrcSongs');
                 list.innerHTML = '';
@@ -980,10 +1069,11 @@
             } catch(e) { alert(e.message); }
         }
         async function doImportSong() {
+            if (operations.length) { alert('Apply or discard pending changes before importing a song.'); return; }
             if (!importSongState.srcPath || importSongState.srcSlot === null) { alert('Select source project and song'); return; }
             const dst = parseInt(document.getElementById('importDstSlot').value);
             if (isNaN(dst)) { alert('Select target slot'); return; }
-            if (!confirm('Import song from source project? This will overwrite target slot. A backup will be created.')) return;
+            if (!confirm('Import song mode data only? The target slot will be replaced, but pattern data in this project will not be copied or overwritten. Rows keep their pattern slot numbers and will use the patterns currently in this project. A backup will be created.')) return;
             try {
                 const res = await fetch('/api/import-song', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({src_path: importSongState.srcPath, src_slot: importSongState.srcSlot, dst_slot: dst})});
                 const data = await res.json();
@@ -1007,8 +1097,12 @@
                 `- To actually apply changes, edit the project using the UI controls (drag/drop, retarget, bulk edit) and click Apply Changes.\n` +
                 `- Apply Changes writes to the .dt2prj file with automatic .bak backup.\n\n` +
                 `Import Song from Project:\n` +
-                `- Copies entire song slot (all rows, mutes, repeats, etc.) from another .dt2prj into target slot.\n` +
-                `- Patterns are referenced by index - if pattern numbers differ, retarget after import.\n\n` +
+                `- Copies only song mode data (rows, mutes, repeats, etc.) from another project into a target slot.\n` +
+                `- It never copies pattern data. Imported rows point to the same pattern slot numbers in the current project, so they use its current patterns.\n\n` +
+                `Song backups:\n` +
+                `- Use Export .bin on a song to save its 3072-byte song slot on your computer.\n` +
+                `- Import Song Backup restores that file into a chosen slot; pattern data stays untouched.\n\n` +
+                `- Use Empty Slot to clear the slot after saving a backup.\n\n` +
                 `Tips:\n` +
                 `- Drag patterns from Pattern Manager onto rows to retarget.\n` +
                 `- Drag songs in Song Slots to swap positions.\n` +
@@ -1032,9 +1126,10 @@
             <div class="modal-header">Import Song from Another Project</div>
             <div class="modal-body">
                 <div style="margin-bottom:8px;">
-                    <label>Source .dt2prj path:</label><br>
-                    <input id="importSrcPath" style="width:100%;background:#151515;color:#e6e6e6;border:1px solid #2a2a2a;padding:4px;font:10px monospace;" placeholder="/path/to/other.dt2prj">
+                    <label>Source project path (.dt2prj or .dn2prj):</label><br>
+                    <input id="importSrcPath" style="width:100%;background:#151515;color:#e6e6e6;border:1px solid #2a2a2a;padding:4px;font:10px monospace;" placeholder="/path/to/other-project.prj">
                     <button style="margin-top:4px;" onclick="loadImportSource()">Load Songs</button>
+                    <div id="importSourceInfo" style="margin-top:4px;color:#8c8c8c;font-size:10px;"></div>
                 </div>
                 <div style="margin-bottom:8px;">
                     <label>Source songs:</label>
@@ -1044,7 +1139,7 @@
                     <label>Import into target slot:</label><br>
                     <select id="importDstSlot" style="background:#151515;color:#e6e6e6;border:1px solid #2a2a2a;padding:4px;"></select>
                 </div>
-                <div style="margin-top:8px;color:#8c8c8c;font-size:10px;">Patterns are referenced by index. Retarget if needed.</div>
+                <div style="margin-top:8px;color:#8c8c8c;font-size:10px;">Only song mode data is copied. Patterns in this project stay untouched; imported rows use the same numbered pattern slots in this project.</div>
             </div>
             <div class="modal-actions">
                 <button onclick="doImportSong()">Import</button>

@@ -49,8 +49,23 @@ PATTERN_NAME_OFF_DN2 = 0x15AD4
 PATTERN_NAME_OFF = PATTERN_NAME_OFF_DT2
 PATTERN_NAME_LEN = 16
 
-def device_name(raw: bytes) -> str:
-    """Identify the project family from the first pattern container version."""
+DN2_IMAGE_SIZE = 0xC4B004
+DT2_IMAGE_SIZE = 0xDD9604
+
+def device_name(raw: bytes, project_suffix: str | None = None) -> str:
+    """Identify a project, preferring its authoritative Transfer file extension."""
+    suffix = (project_suffix or "").lower()
+    if suffix == ".dn2prj":
+        return "DN2"
+    if suffix == ".dt2prj":
+        return "DT2"
+    # The decompressed project image size reliably distinguishes these layouts.
+    # Pattern container version bytes are not sufficient: DN2 projects can
+    # contain version 4 patterns too.
+    if len(raw) <= (DN2_IMAGE_SIZE + DT2_IMAGE_SIZE) // 2:
+        return "DN2"
+    if len(raw) > (DN2_IMAGE_SIZE + DT2_IMAGE_SIZE) // 2:
+        return "DT2"
     if len(raw) >= PATTERN_BASE + 4:
         version = int.from_bytes(raw[PATTERN_BASE:PATTERN_BASE + 4], "big")
         if version == 3:
