@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from .patterns import get_all_patterns_info
+from .patterns import get_all_patterns_info, copy_pattern_block, clear_pattern, swap_patterns, rename_pattern
 from .constants import device_name
 from .project import pack_project, read_project, unpack_project
 from .songs import get_all_songs_info, get_song_rows, get_song_slots, retarget_rows, copy_rows, move_rows, rename_song, swap_songs, delete_rows, reorder_rows, update_row_fields
@@ -27,7 +27,19 @@ def apply_operations(raw: bytes, operations: list[dict]) -> bytes:
     slots = get_song_slots(raw)
     for op in operations:
         op_type = op.get("type")
-        if op_type == "retarget":
+        if op_type == "pattern_copy":
+            raw = copy_pattern_block(raw, op["src_idx"], op["dst_idx"])
+        elif op_type == "pattern_move":
+            raw = copy_pattern_block(raw, op["src_idx"], op["dst_idx"])
+            for slot_idx, slot_data in enumerate(slots):
+                slots[slot_idx] = retarget_rows(slot_data, from_pattern=op["src_idx"], to_pattern=op["dst_idx"])
+        elif op_type == "pattern_swap":
+            raw = swap_patterns(raw, op["pat_a"], op["pat_b"])
+        elif op_type == "pattern_clear":
+            raw = clear_pattern(raw, op["pat_idx"])
+        elif op_type == "pattern_rename":
+            raw = rename_pattern(raw, op["pat_idx"], op["name"])
+        elif op_type == "retarget":
             slot = op["slot"]
             rows = op.get("rows")
             to_pat = op.get("to_pattern")
@@ -41,6 +53,8 @@ def apply_operations(raw: bytes, operations: list[dict]) -> bytes:
             slots[slot] = rename_song(slots[slot], op.get("name", ""))
         elif op_type == "swap_songs":
             # operate on full raw
+            from .songs import set_song_slots
+            raw = set_song_slots(raw, slots)
             raw = swap_songs(raw, op["slot_a"], op["slot_b"])
             slots = get_song_slots(raw)
             continue
@@ -75,6 +89,8 @@ def apply_operations(raw: bytes, operations: list[dict]) -> bytes:
         elif op_type == "clear_song":
             slot = op["slot"]
             from .songs import clear_song
+            from .songs import set_song_slots
+            raw = set_song_slots(raw, slots)
             slots[slot] = clear_song(slots[slot], raw)
         elif op_type == "empty_song":
             slot = op["slot"]

@@ -481,6 +481,7 @@
     <script>
         let state = null;
         let patterns = [];
+        let patternBase = [];
         let operations = [];
         let undoStack = [];
         let redoStack = [];
@@ -503,7 +504,8 @@
             state = await res.json();
             const pres = await fetch('/api/patterns');
             const pdata = await pres.json();
-            patterns = pdata.patterns;
+            patternBase = pdata.patterns.map(p => ({...p}));
+            patterns = patternBase.map(p => ({...p}));
             render();
         }
         
@@ -676,6 +678,7 @@
                         <span class="pattern-refs">${pat.ref_count}</span>
                         <div class="pattern-actions">
                             <button onclick="renamePattern(${pat.index}, event)">✎</button>
+                            <button title="Clear pattern" onclick="clearPattern(${pat.index}, event)">×</button>
                         </div>
                     `;
                     card.addEventListener('dragstart', e => {
@@ -733,20 +736,19 @@
         async function doPatternMove(action) {
             if (!pendingPatternMove) return;
             const {srcIdx, dstIdx} = pendingPatternMove;
-            let url, body;
-            if (action === 'copy') { url = '/api/patterns/copy'; body = {src_idx: srcIdx, dst_idx: dstIdx}; }
-            else if (action === 'move') { url = '/api/patterns/move'; body = {src_idx: srcIdx, dst_idx: dstIdx, also_retarget: true}; }
-            else if (action === 'swap') { url = '/api/patterns/swap'; body = {pat_a: srcIdx, pat_b: dstIdx}; }
+            let op;
+            if (action === 'copy') op = {type: 'pattern_copy', src_idx: srcIdx, dst_idx: dstIdx};
+            else if (action === 'move') {
+                const affected = [];
+                state.songs.forEach(song => song.rows.forEach((row, rowIdx) => {
+                    if (row.pattern === srcIdx) affected.push({slot: song.slot, row_idx: rowIdx, from: srcIdx, to: dstIdx});
+                }));
+                op = {type: 'pattern_move', src_idx: srcIdx, dst_idx: dstIdx, affected};
+            } else if (action === 'swap') op = {type: 'pattern_swap', pat_a: srcIdx, pat_b: dstIdx};
             closePatternModal();
-            if (!confirm('Apply pattern change to project? A backup will be created.')) return;
-            const res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-            const data = await res.json();
-            if (data.success) {
-                alert('Done. Backup: ' + data.backup);
-                loadState();
-            } else {
-                alert('Error: ' + data.error);
-            }
+            const dst = patterns.find(p => p.index === dstIdx);
+            if (!confirm(`${action[0].toUpperCase() + action.slice(1)} pattern ${patterns.find(p => p.index === srcIdx).label} into ${dst.label}? This is staged until you click Apply Changes.`)) return;
+            stagePatternOperation(op);
         }
         
         function rowDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('dragover'); }
@@ -776,11 +778,65 @@
             const pat = patterns.find(p => p.index === patIdx);
             const name = prompt('Rename pattern ' + pat.label + ':', pat.name);
             if (name !== null) {
-                if (!confirm('Rename pattern in project? A backup will be created.')) return;
-                const res = await fetch('/api/patterns/rename', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({pat_idx: patIdx, name: name})});
-                const data = await res.json();
-                if (data.success) { alert('Done. Backup: ' + data.backup); loadState(); } else { alert('Error: ' + data.error); }
+                stagePatternOperation({type: 'pattern_rename', pat_idx: patIdx, name});
             }
+        }
+
+        function clearPattern(patIdx, event) {
+            event.stopPropagation();
+            const pat = patterns.find(p => p.index === patIdx);
+            const refs = pat ? pat.ref_count : 0;
+            const warning = refs ? ` ${refs} song row${refs === 1 ? '' : 's'} still reference ${pat.label}; those rows will point to an empty pattern.` : '';
+            if (!confirm(`Clear pattern ${pat.label}?${warning} This is staged until you click Apply Changes.`)) return;
+            stagePatternOperation({type: 'pattern_clear', pat_idx: patIdx});
+        }
+
+        function stagePatternOperation(op) {
+            pushUndo();
+            operations.push(op);
+            applyPatternPreviewEffects([op]);
+            rebuildPatternPreview();
+            document.getElementById('applyBtn').disabled = false;
+            render();
+        }
+
+        function applyPatternPreviewEffects(ops) {
+            ops.forEach(op => {
+                if (op.type === 'pattern_move') (op.affected || []).forEach(ref => {
+                    const song = state.songs.find(item => item.slot === ref.slot);
+                    if (song && song.rows[ref.row_idx] && song.rows[ref.row_idx].pattern === ref.from) song.rows[ref.row_idx].pattern = ref.to;
+                });
+            });
+        }
+
+        function rebuildPatternPreview() {
+            patterns = patternBase.map(p => ({...p}));
+            operations.forEach(op => {
+                if (op.type === 'pattern_copy' || op.type === 'pattern_move') {
+                    const src = patterns.find(p => p.index === op.src_idx);
+                    const dst = patterns.find(p => p.index === op.dst_idx);
+                    if (src && dst) { dst.name = src.name; dst.has_custom_name = src.has_custom_name; }
+                } else if (op.type === 'pattern_swap') {
+                    const a = patterns.find(p => p.index === op.pat_a), b = patterns.find(p => p.index === op.pat_b);
+                    if (a && b) { [a.name, b.name] = [b.name, a.name]; [a.has_custom_name, b.has_custom_name] = [b.has_custom_name, a.has_custom_name]; }
+                } else if (op.type === 'pattern_clear') {
+                    const pat = patterns.find(p => p.index === op.pat_idx);
+                    if (pat) { pat.name = ''; pat.has_custom_name = false; }
+                } else if (op.type === 'pattern_import') {
+                    (op.source_patterns || []).forEach(source => {
+                        const pat = patterns.find(p => p.index === source.dst_idx);
+                        if (pat) { pat.name = source.name || ''; pat.has_custom_name = Boolean(source.has_custom_name); }
+                    });
+                } else if (op.type === 'pattern_rename') {
+                    const pat = patterns.find(p => p.index === op.pat_idx);
+                    if (pat) { pat.name = op.name.toUpperCase(); pat.has_custom_name = Boolean(op.name.trim()); }
+                }
+            });
+            patterns.forEach(p => { p.ref_count = 0; });
+            state.songs.forEach(song => song.rows.forEach(row => {
+                const pat = patterns.find(p => p.index === row.pattern);
+                if (pat) pat.ref_count += 1;
+            }));
         }
         
         function renderMutePads(mask) {
@@ -981,7 +1037,7 @@
             const data = await res.json();
             if (data.ok || data.success) {
                 alert('Changes applied successfully! Backup: ' + data.backup);
-                operations = []; selectedRows.clear(); document.getElementById('applyBtn').disabled = true; hideDiff();
+                operations = []; undoStack = []; redoStack = []; selectedRows.clear(); document.getElementById('applyBtn').disabled = true; hideDiff(); updateUndoRedo();
                 await loadState();
                 render();
             } else { alert('Error: ' + data.error); }
@@ -997,8 +1053,10 @@
         }
         function undo() {
             if (undoStack.length === 0) return;
+            const previous = operations;
             redoStack.push(JSON.parse(JSON.stringify(operations)));
             operations = undoStack.pop();
+            syncPatternOperationRefs(previous, operations);
             document.getElementById('applyBtn').disabled = operations.length === 0;
             selectedRows.clear();
             render();
@@ -1006,12 +1064,27 @@
         }
         function redo() {
             if (redoStack.length === 0) return;
+            const previous = operations;
             undoStack.push(JSON.parse(JSON.stringify(operations)));
             operations = redoStack.pop();
+            syncPatternOperationRefs(previous, operations);
             document.getElementById('applyBtn').disabled = operations.length === 0;
             selectedRows.clear();
             render();
             updateUndoRedo();
+        }
+
+        function syncPatternOperationRefs(previous, next) {
+            let common = 0;
+            while (common < previous.length && common < next.length && JSON.stringify(previous[common]) === JSON.stringify(next[common])) common++;
+            previous.slice(common).reverse().forEach(op => {
+                if (op.type === 'pattern_move') (op.affected || []).forEach(ref => {
+                    const song = state.songs.find(item => item.slot === ref.slot);
+                    if (song && song.rows[ref.row_idx] && song.rows[ref.row_idx].pattern === ref.to) song.rows[ref.row_idx].pattern = ref.from;
+                });
+            });
+            next.slice(common).forEach(op => applyPatternPreviewEffects([op]));
+            rebuildPatternPreview();
         }
         function exportArrangement() {
             if (!state) return;
@@ -1196,7 +1269,6 @@
             }));
         }
         async function importSelectedPatterns() {
-            if (operations.length) { alert('Apply or discard pending song edits before importing patterns.'); return; }
             if (!patternImportSource) { alert('Load a source project first.'); return; }
             const mappings = patternImportMappings();
             if (!mappings.length || mappings.some(m => !Number.isInteger(m.dst_idx)) || new Set(mappings.map(m => m.dst_idx)).size !== mappings.length) {
@@ -1212,14 +1284,10 @@
                     const targetName = m.destination.name ? ` · ${m.destination.name}` : ' · (unnamed)';
                     return `${m.source.label}${sourceName} → ${m.destination.label}${targetName} (${m.destination.ref_count} song-row refs)`;
                 });
-                const message = `Import ${lines.length} pattern${lines.length === 1 ? '' : 's'} from ${preview.source_project}?\n\n${lines.join('\n')}\n\nThe destination pattern blocks will be replaced. Song rows will not change; any rows referencing a destination slot will use its imported pattern. A backup will be created.`;
+                const message = `Stage import of ${lines.length} pattern${lines.length === 1 ? '' : 's'} from ${preview.source_project}?\n\n${lines.join('\n')}\n\nThe destination pattern blocks will be replaced. Song rows will not change; any rows referencing a destination slot will use its imported pattern. Nothing is written until you click Apply Changes.`;
                 if (!confirm(message)) return;
-                const res = await fetch('/api/import-patterns', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-                const data = await res.json();
-                if (!res.ok || !data.success) throw new Error(data.error || 'Pattern import failed');
+                stagePatternOperation({type: 'pattern_import', src_path: patternImportSource.path, mappings, source_patterns: preview.mappings.map(item => ({dst_idx: item.dst_idx, name: item.source.name, has_custom_name: item.source.has_custom_name}))});
                 closePatternImport();
-                await loadState();
-                alert(`Patterns imported. Song rows were left unchanged. Backup: ${data.backup}`);
             } catch (err) {
                 alert(`Could not import patterns: ${err.message}`);
             }

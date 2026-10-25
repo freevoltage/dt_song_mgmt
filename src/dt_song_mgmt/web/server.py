@@ -18,6 +18,21 @@ from ..constants import device_name
 
 def create_handler(prj: Path):
     class Handler(BaseHTTPRequestHandler):
+        def _apply_staged_operations(self, raw, operations):
+            for op in operations:
+                if op.get('type') == 'pattern_import':
+                    src_path = Path(op['src_path']).expanduser().resolve()
+                    if src_path == prj.expanduser().resolve():
+                        raise ValueError('choose a different source project')
+                    _manifest, payload, _members = read_project(src_path)
+                    _head, source_raw = unpack_project(payload)
+                    if device_name(source_raw, src_path.suffix) != device_name(raw, prj.suffix):
+                        raise ValueError('patterns can only be imported between matching devices')
+                    raw = copy_pattern_blocks(source_raw, raw, op.get('mappings'))
+                else:
+                    raw = apply_operations(raw, [op])
+            return raw
+
         def _pattern_import_context(self, data):
             src_path = Path(data['src_path']).expanduser().resolve()
             if src_path == prj.expanduser().resolve():
@@ -126,7 +141,7 @@ def create_handler(prj: Path):
                     head, raw = unpack_project(payload)
                     try:
                         old_songs = get_all_songs_info(raw)
-                        new_raw = apply_operations(raw, ops)
+                        new_raw = self._apply_staged_operations(raw, ops)
                         pattern_names = collect_pattern_names(new_raw)
                         slots = get_song_slots(new_raw)
                         songs = []
@@ -164,7 +179,7 @@ def create_handler(prj: Path):
                     manifest, payload, members = read_project(prj)
                     pname = payload_name(manifest)
                     head, raw = unpack_project(payload)
-                    new_raw = apply_operations(raw, ops)
+                    new_raw = self._apply_staged_operations(raw, ops)
                     new_payload = pack_project(head, new_raw)
                     bak = prj.with_suffix(prj.suffix + ".bak")
                     shutil.copy2(prj, bak)
