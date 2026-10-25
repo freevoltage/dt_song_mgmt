@@ -4,12 +4,22 @@ Dump and restore song slots from Elektron Transfer Digitakt II (`.dt2prj`) and D
 
 Transfer stores the project as LZ4-compressed 32 KiB blocks, not raw song bytes. This script decompresses the project, copies the 16 uncompressed song slots (3072 bytes each), and recompresses on restore so the device can import the file. Pattern names are read and written using the device-specific layout.
 
-Python 3. Requires nothing extra; `liblz4` is used if present.
+Python 3.10 or newer. No runtime dependencies are required.
+
+## Install for development
+
+From the project root, install the command in editable mode:
+
+```bash
+uv tool install --editable .
+```
+
+The `dsm` command then uses this working tree, so source changes are available without reinstalling. Restart a running web server after changing Python code.
 
 ## Dump
 
 ```bash
-python -m dt_song_mgmt project.dt2prj
+dsm project.dt2prj
 ```
 
 Writes 16 files to `./SONGS_<stem>/`, plus a setlist page:
@@ -24,7 +34,7 @@ songs.html
 Overwrites the `.dt2prj` (writes a `.bak` first for backup):
 
 ```bash
-python -m dt_song_mgmt project.dt2prj restore ./SONGS_<stem> NEW_NAME
+dsm project.dt2prj restore ./SONGS_<stem> NEW_NAME
 ```
 
 `NEW_NAME` is the project name stored in the `.dt2prj` payload, not just the file or folder name.
