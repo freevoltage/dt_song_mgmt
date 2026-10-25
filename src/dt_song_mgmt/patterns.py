@@ -40,7 +40,7 @@ def rename_pattern(raw: bytes, pat_idx: int, name: str) -> bytes:
             out.append(c)
         else:
             out.append("_")
-    enc = ("".join(out))[:PATTERN_NAME_LEN].ljust(PATTERN_NAME_LEN, "")
+    enc = ("".join(out))[:PATTERN_NAME_LEN].ljust(PATTERN_NAME_LEN, "\x00")
     patched[cfg_off : cfg_off + PATTERN_NAME_LEN] = enc.encode("ascii")
     return bytes(patched)
 

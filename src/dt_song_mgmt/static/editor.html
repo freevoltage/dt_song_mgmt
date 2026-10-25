@@ -477,12 +477,31 @@
             </div>
         </div>
     </div>
+
+    <div id="nameEditModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="nameEditTitle">Rename</div>
+            <div class="modal-body">
+                <input id="nameEditInput" type="text" maxlength="16" autocomplete="off" oninput="updateNameEditStatus()" onkeydown="if(event.key==='Enter') saveNameEdit(); if(event.key==='Escape') closeNameEditor();" style="width:100%;background:#151515;color:#e6e6e6;border:1px solid #2a2a2a;padding:6px;font:12px ui-monospace,monospace;">
+                <div style="display:flex;justify-content:space-between;gap:10px;margin-top:5px;font-size:10px;color:#8c8c8c;">
+                    <span id="nameEditStatus">Maximum 16 characters.</span>
+                    <span id="nameEditCount">0 / 16</span>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="nameEditSave" class="primary" onclick="saveNameEdit()">Save Name</button>
+                <button onclick="closeNameEditor()">Cancel</button>
+            </div>
+        </div>
+    </div>
     
     <script>
         let state = null;
         let patterns = [];
         let patternBase = [];
         const collapsedPatternBanks = new Set();
+        let songNameBase = {};
+        let pendingNameEdit = null;
         let operations = [];
         let undoStack = [];
         let redoStack = [];
@@ -503,6 +522,7 @@
         async function loadState() {
             const res = await fetch('/api/state');
             state = await res.json();
+            songNameBase = Object.fromEntries(state.songs.map(song => [song.slot, song.name]));
             const pres = await fetch('/api/patterns');
             const pdata = await pres.json();
             patternBase = pdata.patterns.map(p => ({...p}));
@@ -559,6 +579,7 @@
             });
         }
         function render() {
+            if (patternBase.length) rebuildPatternPreview();
             const device = state.device || 'DT2';
             document.title = 'Elektron Digi Song Mode Manager';
             document.getElementById('appTitle').textContent = 'Elektron Digi Song Mode Manager';
@@ -783,10 +804,7 @@
         async function renamePattern(patIdx, event) {
             event.stopPropagation();
             const pat = patterns.find(p => p.index === patIdx);
-            const name = prompt('Rename pattern ' + pat.label + ':', pat.name);
-            if (name !== null) {
-                stagePatternOperation({type: 'pattern_rename', pat_idx: patIdx, name});
-            }
+            openNameEditor('pattern', patIdx, pat.name, `Rename pattern ${pat.label}`);
         }
 
         function clearPattern(patIdx, event) {
@@ -832,7 +850,18 @@
                     });
                 } else if (op.type === 'pattern_rename') {
                     const pat = patterns.find(p => p.index === op.pat_idx);
-                    if (pat) { pat.name = op.name.toUpperCase(); pat.has_custom_name = Boolean(op.name.trim()); }
+                    if (pat) { pat.name = normalizeDeviceName(op.name); pat.has_custom_name = Boolean(op.name.trim()); }
+                }
+            });
+            state.songs.forEach(song => { song.name = songNameBase[song.slot] ?? song.name; });
+            operations.forEach(op => {
+                if (op.type === 'swap_songs') {
+                    const a = state.songs.find(item => item.slot === op.slot_a);
+                    const b = state.songs.find(item => item.slot === op.slot_b);
+                    if (a && b) [a.name, b.name] = [b.name, a.name];
+                } else if (op.type === 'rename_song') {
+                    const song = state.songs.find(item => item.slot === op.slot);
+                    if (song) song.name = normalizeDeviceName(op.name);
                 }
             });
             patterns.forEach(p => { p.ref_count = 0; });
@@ -986,12 +1015,55 @@
             document.getElementById('applyBtn').disabled = false;
         }
         function renameSong(slot) {
-            const name = prompt('Enter new song name:');
-            if (name) {
-                operations.push({type: 'rename_song', slot: slot, name: name});
+            const song = state.songs.find(item => item.slot === slot);
+            openNameEditor('song', slot, song ? song.name : '', `Rename song ${String(slot).padStart(2, '0')}`);
+        }
+
+        function normalizeDeviceName(value) {
+            return value.toUpperCase().replace(/[^A-Z0-9~ #$-]/g, '_').slice(0, 16);
+        }
+
+        function openNameEditor(type, index, value, title) {
+            pendingNameEdit = {type, index};
+            document.getElementById('nameEditTitle').textContent = title;
+            const input = document.getElementById('nameEditInput');
+            input.value = value || '';
+            updateNameEditStatus();
+            document.getElementById('nameEditModal').classList.add('active');
+            input.focus();
+            input.select();
+        }
+
+        function updateNameEditStatus() {
+            const input = document.getElementById('nameEditInput');
+            const value = input.value;
+            const nonAscii = /[^\x00-\x7F]/.test(value);
+            document.getElementById('nameEditCount').textContent = `${value.length} / 16`;
+            document.getElementById('nameEditStatus').textContent = nonAscii
+                ? 'Use ASCII characters. Unsupported punctuation becomes _.'
+                : 'Max 16 characters. Names are uppercased; unsupported punctuation becomes _.';
+            document.getElementById('nameEditSave').disabled = nonAscii || value.length > 16;
+        }
+
+        function closeNameEditor() {
+            document.getElementById('nameEditModal').classList.remove('active');
+            pendingNameEdit = null;
+        }
+
+        function saveNameEdit() {
+            if (!pendingNameEdit) return;
+            const name = document.getElementById('nameEditInput').value;
+            if (name.length > 16 || /[^\x00-\x7F]/.test(name)) return;
+            const {type, index} = pendingNameEdit;
+            if (type === 'pattern') stagePatternOperation({type: 'pattern_rename', pat_idx: index, name});
+            else {
+                pushUndo();
+                operations.push({type: 'rename_song', slot: index, name});
                 document.getElementById('applyBtn').disabled = false;
+                rebuildPatternPreview();
                 render();
             }
+            closeNameEditor();
         }
         function clearSong(slot) {
             if (confirm('Clear all rows from this song?')) {
