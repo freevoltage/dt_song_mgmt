@@ -8,4 +8,16 @@ __pycache__/
 *.pyzw
 *.pyzwz
 *.pyzwzw
-test
+
+# Local Elektron projects, backups, and generated song dumps
+projects/
+*.dt2prj
+*.dn2prj
+*_unzipped/
+SONGS_*/
+
+# Python build outputs and local environments
+.venv/
+build/
+dist/
+*.egg-info/

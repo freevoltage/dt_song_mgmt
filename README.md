@@ -22,7 +22,7 @@ The `dsm` command then uses this working tree, so source changes are available w
 dsm project.dt2prj
 ```
 
-Writes 16 files to `./SONGS_<stem>/`, plus a setlist page:
+Writes 16 files to `SONGS_<stem>/` beside the source project, plus a setlist page. The project archive is read in memory; the app does not extract its samples or create an unpacked project directory.
 
 ```
 00_<name>.bin ... 15_<name>.bin

@@ -62,7 +62,9 @@ def dump_songs(prj: Path) -> Path:
     _manifest, payload, _ = _read_project(prj)
     _head, raw = _unpack_project(payload)
     start = song_table_off(raw)
-    outdir = Path.cwd() / f"SONGS_{prj.stem}"
+    # Keep the extracted song files beside their source project, not in the
+    # directory from which the user happened to launch dsm.
+    outdir = prj.parent / f"SONGS_{prj.stem}"
     outdir.mkdir(parents=True, exist_ok=True)
     for p in outdir.glob("*.bin"):
         p.unlink()
