@@ -46,7 +46,9 @@
         
         .main-layout {
             display: flex;
-            height: calc(100vh - 37px);
+            height: calc(100dvh - var(--app-header-height, 37px));
+            min-height: 0;
+            min-width: 0;
         }
         .pattern-panel {
             width: 280px;
@@ -167,12 +169,13 @@
             flex-direction: column;
             gap: 14px;
             max-width: 1100px;
+            min-width: 0;
         }
         .song-card {
             background: #111;
             border: 1px solid #252525;
             border-radius: 3px;
-            overflow: hidden;
+            overflow-x: auto;
         }
         .song-card.empty { opacity: 0.5; }
         .song-header {
@@ -357,6 +360,32 @@
         .pattern-import-destination { width: 100%; min-width: 0; background: #151515; color: #e6e6e6; border: 1px solid #2a2a2a; padding: 4px; font: 10px ui-monospace, monospace; }
         .pattern-import-status { color: #999; margin-top: 6px; min-height: 14px; }
         @media (max-width: 700px) { .pattern-import-row { grid-template-columns: 1fr; gap: 4px; } }
+        @media (max-width: 1100px) {
+            header { flex-wrap: wrap; gap: 5px 8px; padding: 6px 8px; }
+            h1 { font-size: 11px; }
+            .project-name { min-width: 0; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .header-actions { order: 3; flex: 1 0 100%; width: 100%; margin-left: 0; overflow-x: auto; padding-bottom: 2px; }
+            .header-actions button { flex: 0 0 auto; }
+            .main-layout { height: calc(100dvh - var(--app-header-height, 72px)); }
+            .song-panel { width: 150px; flex: 0 0 150px; }
+            .pattern-panel { width: 190px; flex: 0 0 190px; }
+            .content { min-width: 0; padding: 8px; }
+            .song-header { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
+            .song-name { min-width: 90px; }
+            .song-actions { flex-wrap: wrap; }
+            .rows-table { min-width: 590px; }
+        }
+        @media (max-width: 760px) {
+            .song-panel { display: none; }
+            .pattern-panel.collapsed { display: none; }
+            .pattern-panel:not(.collapsed) { display: flex; position: fixed; top: var(--app-header-height, 72px); bottom: 0; left: 0; width: min(80vw, 280px); z-index: 80; }
+            .pattern-panel:not(.collapsed) .panel-content,
+            .pattern-panel:not(.collapsed) .panel-header span,
+            .pattern-panel:not(.collapsed) .panel-header button { display: initial; }
+            .content { padding: 6px; }
+            .song-pattern-summary { padding: 5px 8px; }
+            .song-actions button { padding: 3px 5px; }
+        }
     </style>
 </head>
 <body>
@@ -459,6 +488,15 @@
         let lastClickedKey = null;
         let pendingPatternMove = null;
         let patternImportSource = null;
+
+        const updateAppHeaderHeight = () => {
+            document.documentElement.style.setProperty('--app-header-height', `${document.querySelector('header').offsetHeight}px`);
+        };
+        new ResizeObserver(updateAppHeaderHeight).observe(document.querySelector('header'));
+        if (window.innerWidth <= 760) {
+            document.getElementById('patternPanel').classList.add('collapsed');
+            document.getElementById('togglePatternBtn').textContent = 'Show Patterns';
+        }
         
         async function loadState() {
             const res = await fetch('/api/state');
