@@ -482,6 +482,7 @@
         let state = null;
         let patterns = [];
         let patternBase = [];
+        const collapsedPatternBanks = new Set();
         let operations = [];
         let undoStack = [];
         let redoStack = [];
@@ -649,10 +650,12 @@
         function toggleBank(bank, el) {
             const list = document.getElementById('bank-' + bank);
             if (!list) return;
-            if (list.style.display === 'none') {
+            if (collapsedPatternBanks.has(bank)) {
+                collapsedPatternBanks.delete(bank);
                 list.style.display = 'block';
                 el.textContent = '▾ Bank ' + bank;
             } else {
+                collapsedPatternBanks.add(bank);
                 list.style.display = 'none';
                 el.textContent = '▸ Bank ' + bank;
             }
@@ -664,7 +667,8 @@
             banks.forEach(bank => {
                 const section = document.createElement('div');
                 section.className = 'bank-section';
-                section.innerHTML = `<div class="bank-label" style="cursor:pointer" onclick="toggleBank('${bank}', this)">▾ Bank ${bank}</div><div class="pattern-list" id="bank-${bank}"></div>`;
+                const collapsed = collapsedPatternBanks.has(bank);
+                section.innerHTML = `<div class="bank-label" style="cursor:pointer" onclick="toggleBank('${bank}', this)">${collapsed ? '▸' : '▾'} Bank ${bank}</div><div class="pattern-list" id="bank-${bank}" style="display:${collapsed ? 'none' : 'block'}"></div>`;
                 content.appendChild(section);
                 const list = section.querySelector('.pattern-list');
                 patterns.filter(p => p.label.startsWith(bank)).forEach(pat => {
