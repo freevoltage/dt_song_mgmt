@@ -679,7 +679,7 @@
                         <span class="pattern-refs">${pat.ref_count}</span>
                         <div class="pattern-actions">
                             <button onclick="renamePattern(${pat.index}, event)">✎</button>
-                            <button title="Clear pattern" onclick="clearPattern(${pat.index}, event)">×</button>
+                            <button title="Clear this pattern slot; song rows assigned to it stay assigned" onclick="clearPattern(${pat.index}, event)">×</button>
                         </div>
                     `;
                     card.addEventListener('dragstart', e => {
@@ -787,10 +787,6 @@
 
         function clearPattern(patIdx, event) {
             event.stopPropagation();
-            const pat = patterns.find(p => p.index === patIdx);
-            const refs = pat ? pat.ref_count : 0;
-            const warning = refs ? ` ${refs} song row${refs === 1 ? '' : 's'} still reference ${pat.label}; those rows will point to an empty pattern.` : '';
-            if (!confirm(`Clear pattern ${pat.label}?${warning} This is staged until you click Apply Changes.`)) return;
             stagePatternOperation({type: 'pattern_clear', pat_idx: patIdx});
         }
 
