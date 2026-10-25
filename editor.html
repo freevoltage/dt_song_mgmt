@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Song Editor</title>
+    <title>Elektron Digi Song Mode Manager</title>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <style>
         :root { color-scheme: dark; }
@@ -350,7 +350,7 @@
 </head>
 <body>
     <header>
-        <h1 id="appTitle">Song Editor</h1>
+        <h1 id="appTitle">Elektron Digi Song Mode Manager</h1>
         <span class="project-name" id="projectName"></span>
             <span class="device-badge" id="deviceName"></span>
         <div class="header-actions">
@@ -513,9 +513,8 @@
         }
         function render() {
             const device = state.device || 'DT2';
-            const deviceTitle = device === 'DN2' ? 'Digitone II Song Editor' : 'Digitakt II Song Editor';
-            document.title = deviceTitle;
-            document.getElementById('appTitle').textContent = deviceTitle;
+            document.title = 'Elektron Digi Song Mode Manager';
+            document.getElementById('appTitle').textContent = 'Elektron Digi Song Mode Manager';
             const projectFile = state.project_file || state.project_name || 'Project';
             document.getElementById('projectName').textContent = projectFile;
             document.getElementById('projectName').title = `Internal project name: ${state.project_name || ''}`;

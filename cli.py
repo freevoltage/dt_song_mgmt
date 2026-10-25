@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
-        print("dsm (Digitakt / Digitone Song Management)", file=sys.stderr)
+        print("Elektron Digi Song Mode Manager (dsm)", file=sys.stderr)
         print("Usage: dsm <project> [info|rows|restore|web] ...", file=sys.stderr)
         raise SystemExit(0 if argv and argv[0] in ("-h", "--help") else 2)
 

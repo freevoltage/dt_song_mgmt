@@ -1,4 +1,4 @@
-# dt_song_mgmt
+# Elektron Digi Song Mode Manager
 
 Dump and restore song slots from Elektron Transfer Digitakt II (`.dt2prj`) and Digitone II (`.dn2prj`) projects.
 
