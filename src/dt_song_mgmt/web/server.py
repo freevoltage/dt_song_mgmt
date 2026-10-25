@@ -9,14 +9,42 @@ import shutil
 import base64
 from urllib.parse import quote
 
-from ..patterns import get_all_patterns_info, rename_pattern, copy_pattern_block, clear_pattern, swap_patterns, move_pattern, retarget_all_pattern_refs
+from ..patterns import get_all_patterns_info, rename_pattern, copy_pattern_block, copy_pattern_blocks, validate_pattern_mapping, clear_pattern, swap_patterns, move_pattern, retarget_all_pattern_refs
 from ..project import pack_project, read_project, unpack_project, payload_name
 from ..songs import get_song_slots, get_song_info, get_all_songs_info, collect_pattern_names, song_name, SONG_SLOTS, SONG_SIZE
 from ..state import apply_operations, get_project_state
+from ..constants import device_name
 
 
 def create_handler(prj: Path):
     class Handler(BaseHTTPRequestHandler):
+        def _pattern_import_context(self, data):
+            src_path = Path(data['src_path']).expanduser().resolve()
+            if src_path == prj.expanduser().resolve():
+                raise ValueError('choose a different source project')
+            mappings = data.get('mappings')
+            pairs = validate_pattern_mapping(mappings)
+            _source_manifest, source_payload, _source_members = read_project(src_path)
+            _source_head, source_raw = unpack_project(source_payload)
+            target_manifest, target_payload, target_members = read_project(prj)
+            target_head, target_raw = unpack_project(target_payload)
+            source_device = device_name(source_raw, src_path.suffix)
+            target_device = device_name(target_raw, prj.suffix)
+            if source_device != target_device:
+                raise ValueError(f'patterns can only be imported between matching devices ({source_device} → {target_device})')
+            source_patterns = get_all_patterns_info(source_raw)
+            target_patterns = get_all_patterns_info(target_raw)
+            details = [
+                {
+                    'src_idx': src_idx,
+                    'dst_idx': dst_idx,
+                    'source': source_patterns[src_idx],
+                    'destination': target_patterns[dst_idx],
+                }
+                for src_idx, dst_idx in pairs
+            ]
+            return src_path, source_raw, target_raw, target_head, target_members, payload_name(target_manifest), details, source_device
+
         def _send_json(self, obj, code=200):
             data = json.dumps(obj).encode()
             self.send_response(code)
@@ -274,6 +302,52 @@ def create_handler(prj: Path):
                     self._send_json({'success': True, 'backup': str(bak)})
                 except Exception as e:
                     self._send_json({'error': str(e)}, 500)
+            elif parsed.path == '/api/list-project-patterns':
+                try:
+                    data = json.loads(body)
+                    src_path = Path(data['src_path']).expanduser().resolve()
+                    if src_path == prj.expanduser().resolve():
+                        raise ValueError('choose a different source project')
+                    _manifest, payload, _members = read_project(src_path)
+                    _head, raw = unpack_project(payload)
+                    self._send_json({
+                        'patterns': get_all_patterns_info(raw),
+                        'device': device_name(raw, src_path.suffix),
+                        'project_file': src_path.name,
+                    })
+                except Exception as e:
+                    self._send_json({'error': str(e)}, 400)
+            elif parsed.path == '/api/import-patterns/preview':
+                try:
+                    data = json.loads(body)
+                    src_path, _source_raw, _target_raw, _target_head, _target_members, _target_name, details, device = self._pattern_import_context(data)
+                    self._send_json({
+                        'ok': True,
+                        'source_project': src_path.name,
+                        'device': device,
+                        'mappings': details,
+                    })
+                except Exception as e:
+                    self._send_json({'error': str(e)}, 400)
+            elif parsed.path == '/api/import-patterns':
+                try:
+                    data = json.loads(body)
+                    src_path, source_raw, target_raw, target_head, target_members, pname, details, device = self._pattern_import_context(data)
+                    new_raw = copy_pattern_blocks(source_raw, target_raw, data.get('mappings'))
+                    new_payload = pack_project(target_head, new_raw)
+                    backup = prj.with_suffix(prj.suffix + '.bak')
+                    shutil.copy2(prj, backup)
+                    from ..project import write_project
+                    write_project(prj, target_members, pname, new_payload)
+                    self._send_json({
+                        'success': True,
+                        'backup': str(backup),
+                        'source_project': src_path.name,
+                        'device': device,
+                        'mappings': details,
+                    })
+                except Exception as e:
+                    self._send_json({'error': str(e)}, 400)
             elif parsed.path == '/api/import-song-file':
                 try:
                     data = json.loads(body)

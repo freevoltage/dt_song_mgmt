@@ -55,6 +55,46 @@ def copy_pattern_block(raw: bytes, src_idx: int, dst_idx: int) -> bytes:
     return bytes(patched)
 
 
+def validate_pattern_mapping(mappings: list[dict]) -> list[tuple[int, int]]:
+    """Validate source/destination pattern slot pairs and return normalized indices."""
+    if not isinstance(mappings, list) or not mappings:
+        raise ValueError("select at least one source pattern")
+    pairs = []
+    destinations = set()
+    for item in mappings:
+        if not isinstance(item, dict):
+            raise ValueError("each pattern mapping must include source and destination slots")
+        src_idx, dst_idx = item.get("src_idx"), item.get("dst_idx")
+        if isinstance(src_idx, bool) or isinstance(dst_idx, bool):
+            raise ValueError("pattern slots must be integers")
+        try:
+            src_idx, dst_idx = int(src_idx), int(dst_idx)
+        except (TypeError, ValueError):
+            raise ValueError("pattern slots must be integers") from None
+        if not (0 <= src_idx < PATTERN_SLOTS and 0 <= dst_idx < PATTERN_SLOTS):
+            raise ValueError("pattern slots must be between 0 and 127")
+        if dst_idx in destinations:
+            raise ValueError(f"destination pattern {pattern_label(dst_idx)} is mapped more than once")
+        destinations.add(dst_idx)
+        pairs.append((src_idx, dst_idx))
+    return pairs
+
+
+def copy_pattern_blocks(source_raw: bytes, target_raw: bytes, mappings: list[dict]) -> bytes:
+    """Copy complete pattern containers between compatible project images."""
+    pairs = validate_pattern_mapping(mappings)
+    patched = bytearray(target_raw)
+    for src_idx, dst_idx in pairs:
+        src_start = PATTERN_BASE + src_idx * PATTERN_STRIDE
+        dst_start = PATTERN_BASE + dst_idx * PATTERN_STRIDE
+        src_end = src_start + PATTERN_STRIDE
+        dst_end = dst_start + PATTERN_STRIDE
+        if src_end > len(source_raw) or dst_end > len(patched):
+            raise ValueError("project image is too short to contain the selected pattern")
+        patched[dst_start:dst_end] = source_raw[src_start:src_end]
+    return bytes(patched)
+
+
 def clear_pattern(raw: bytes, pat_idx: int) -> bytes:
     if not 0 <= pat_idx < PATTERN_SLOTS:
         raise ValueError("bad pattern index")

@@ -346,6 +346,17 @@
         .modal-header { font-weight: 650; margin-bottom: 10px; }
         .modal-body { margin-bottom: 14px; color: #b0b0b0; }
         .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+        .pattern-import-content { max-width: 780px; width: 94%; max-height: 92vh; display: flex; flex-direction: column; }
+        .pattern-import-body { overflow-y: auto; }
+        .pattern-import-list { max-height: 48vh; overflow-y: auto; border: 1px solid #2a2a2a; background: #0f0f0f; }
+        .pattern-import-row { display: grid; grid-template-columns: minmax(250px, 1fr) minmax(250px, 1fr); gap: 10px; align-items: center; padding: 4px 7px; border-bottom: 1px solid #1c1c1c; }
+        .pattern-import-row.source-incompatible { opacity: .45; }
+        .pattern-import-source { display: flex; align-items: center; gap: 6px; min-width: 0; }
+        .pattern-import-source-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pattern-import-refs { color: #777; font-size: 9px; white-space: nowrap; }
+        .pattern-import-destination { width: 100%; min-width: 0; background: #151515; color: #e6e6e6; border: 1px solid #2a2a2a; padding: 4px; font: 10px ui-monospace, monospace; }
+        .pattern-import-status { color: #999; margin-top: 6px; min-height: 14px; }
+        @media (max-width: 700px) { .pattern-import-row { grid-template-columns: 1fr; gap: 4px; } }
     </style>
 </head>
 <body>
@@ -379,6 +390,7 @@
         <aside id="patternPanel" class="pattern-panel">
             <div class="panel-header">
                 <span>Pattern Manager</span>
+                <button onclick="showPatternImport()">Import Patterns</button>
             </div>
             <div class="panel-content" id="patternPanelContent"></div>
         </aside>
@@ -446,6 +458,7 @@
         let selectedRows = new Set();
         let lastClickedKey = null;
         let pendingPatternMove = null;
+        let patternImportSource = null;
         
         async function loadState() {
             const res = await fetch('/api/state');
@@ -1055,6 +1068,124 @@
         function closeImportSong() {
             document.getElementById('importSongModal').classList.remove('active');
         }
+        function showPatternImport() {
+            patternImportSource = null;
+            document.getElementById('patternImportPath').value = '';
+            document.getElementById('patternImportInfo').textContent = '';
+            document.getElementById('patternImportStatus').textContent = 'Load a source project to choose patterns.';
+            document.getElementById('patternImportList').innerHTML = '';
+            document.getElementById('importPatternsBtn').disabled = true;
+            document.getElementById('patternImportModal').classList.add('active');
+        }
+        function closePatternImport() {
+            document.getElementById('patternImportModal').classList.remove('active');
+            patternImportSource = null;
+        }
+        async function loadPatternImportSource() {
+            const path = document.getElementById('patternImportPath').value.trim();
+            if (!path) { alert('Enter the source project path.'); return; }
+            const status = document.getElementById('patternImportStatus');
+            status.textContent = 'Loading patterns…';
+            try {
+                const res = await fetch('/api/list-project-patterns', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({src_path: path})
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) throw new Error(data.error || `Could not load project (${res.status})`);
+                patternImportSource = {path, projectFile: data.project_file, device: data.device, patterns: data.patterns || []};
+                const deviceName = data.device === 'DN2' ? 'Digitone II' : 'Digitakt II';
+                const currentDevice = state.device || 'DT2';
+                const compatible = data.device === currentDevice;
+                document.getElementById('patternImportInfo').textContent = `${data.project_file} · ${deviceName} (current project: ${currentDevice === 'DN2' ? 'Digitone II' : 'Digitakt II'})`;
+                const targetPatterns = patterns;
+                const options = '<option value="">Choose destination slot…</option>' + targetPatterns.map(p => {
+                    const name = p.name ? ` · ${escapeHtml(p.name)}` : ' · (unnamed)';
+                    return `<option value="${p.index}">${p.label}${name} · ${p.ref_count} row refs</option>`;
+                }).join('');
+                const list = document.getElementById('patternImportList');
+                list.innerHTML = '';
+                patternImportSource.patterns.forEach(p => {
+                    const row = document.createElement('div');
+                    row.className = `pattern-import-row${compatible ? '' : ' source-incompatible'}`;
+                    const name = p.name ? escapeHtml(p.name) : '(unnamed)';
+                    row.innerHTML = `
+                        <label class="pattern-import-source">
+                            <input class="pattern-import-check" type="checkbox" value="${p.index}" ${compatible ? '' : 'disabled'} onchange="updatePatternImportControls()">
+                            <strong>${p.label}</strong>
+                            <span class="pattern-import-source-name" title="${name}">${name}</span>
+                            <span class="pattern-import-refs">${p.ref_count} refs</span>
+                        </label>
+                        <select class="pattern-import-destination" id="patternImportDst${p.index}" disabled onchange="updatePatternImportControls()">${options}</select>
+                    `;
+                    list.appendChild(row);
+                });
+                if (compatible) {
+                    status.textContent = 'Select source patterns and assign a different destination slot to each.';
+                } else {
+                    status.textContent = 'Pattern import requires matching device types. This source project cannot be imported into the current project.';
+                }
+                updatePatternImportControls();
+            } catch (err) {
+                patternImportSource = null;
+                status.textContent = 'Could not load source patterns.';
+                alert(`Could not load patterns: ${err.message}`);
+            }
+        }
+        function updatePatternImportControls() {
+            const selected = [...document.querySelectorAll('.pattern-import-check:checked')];
+            const destinations = [];
+            let allMapped = selected.length > 0;
+            selected.forEach(check => {
+                const sourceIndex = Number(check.value);
+                const destination = document.getElementById(`patternImportDst${sourceIndex}`);
+                destination.disabled = !check.checked;
+                if (!destination.value) allMapped = false;
+                else destinations.push(Number(destination.value));
+            });
+            const duplicate = destinations.length !== new Set(destinations).size;
+            const compatible = patternImportSource && patternImportSource.device === (state.device || 'DT2');
+            document.getElementById('importPatternsBtn').disabled = !compatible || !allMapped || duplicate;
+            const status = document.getElementById('patternImportStatus');
+            if (duplicate) status.textContent = 'Each source pattern needs a unique destination slot.';
+            else if (compatible && selected.length) status.textContent = allMapped ? `${selected.length} pattern${selected.length === 1 ? '' : 's'} ready to import.` : 'Choose a destination slot for every selected pattern.';
+            else if (compatible) status.textContent = 'Select source patterns and assign a different destination slot to each.';
+        }
+        function patternImportMappings() {
+            return [...document.querySelectorAll('.pattern-import-check:checked')].map(check => ({
+                src_idx: Number(check.value),
+                dst_idx: Number(document.getElementById(`patternImportDst${check.value}`).value),
+            }));
+        }
+        async function importSelectedPatterns() {
+            if (operations.length) { alert('Apply or discard pending song edits before importing patterns.'); return; }
+            if (!patternImportSource) { alert('Load a source project first.'); return; }
+            const mappings = patternImportMappings();
+            if (!mappings.length || mappings.some(m => !Number.isInteger(m.dst_idx)) || new Set(mappings.map(m => m.dst_idx)).size !== mappings.length) {
+                alert('Select patterns and assign each a unique destination slot.'); return;
+            }
+            const body = {src_path: patternImportSource.path, mappings};
+            try {
+                const previewRes = await fetch('/api/import-patterns/preview', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+                const preview = await previewRes.json();
+                if (!previewRes.ok || preview.error) throw new Error(preview.error || 'Could not preview pattern import');
+                const lines = preview.mappings.map(m => {
+                    const sourceName = m.source.name ? ` · ${m.source.name}` : '';
+                    const targetName = m.destination.name ? ` · ${m.destination.name}` : ' · (unnamed)';
+                    return `${m.source.label}${sourceName} → ${m.destination.label}${targetName} (${m.destination.ref_count} song-row refs)`;
+                });
+                const message = `Import ${lines.length} pattern${lines.length === 1 ? '' : 's'} from ${preview.source_project}?\n\n${lines.join('\n')}\n\nThe destination pattern blocks will be replaced. Song rows will not change; any rows referencing a destination slot will use its imported pattern. A backup will be created.`;
+                if (!confirm(message)) return;
+                const res = await fetch('/api/import-patterns', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Pattern import failed');
+                closePatternImport();
+                await loadState();
+                alert(`Patterns imported. Song rows were left unchanged. Backup: ${data.backup}`);
+            } catch (err) {
+                alert(`Could not import patterns: ${err.message}`);
+            }
+        }
         async function loadImportSource() {
             const path = document.getElementById('importSrcPath').value.trim();
             if (!path) { alert('Enter path to source .dt2prj or .dn2prj'); return; }
@@ -1109,6 +1240,9 @@
                 `Import Song from Project:\n` +
                 `- Copies only song mode data (rows, mutes, repeats, etc.) from another project into a target slot.\n` +
                 `- It never copies pattern data. Imported rows point to the same pattern slot numbers in the current project, so they use its current patterns.\n\n` +
+                `Import Patterns from Project:\n` +
+                `- Select source patterns, choose a destination slot for each, and confirm which current patterns will be replaced.\n` +
+                `- Only projects from the same device type can exchange patterns. Song rows are not changed by pattern import.\n\n` +
                 `Song backups:\n` +
                 `- Use Export .bin on a song to save its 3072-byte song slot on your computer.\n` +
                 `- Import Song Backup restores that file into a chosen slot; pattern data stays untouched.\n\n` +
@@ -1131,6 +1265,25 @@
         });
         loadState();
     </script>
+    <div id="patternImportModal" class="modal">
+        <div class="modal-content pattern-import-content">
+            <div class="modal-header">Import Patterns from Another Project</div>
+            <div class="modal-body pattern-import-body">
+                <div style="margin-bottom:8px;">
+                    <label>Source project path (.dt2prj or .dn2prj):</label><br>
+                    <input id="patternImportPath" style="width:100%;background:#151515;color:#e6e6e6;border:1px solid #2a2a2a;padding:4px;font:10px monospace;" placeholder="/path/to/other-project.prj">
+                    <button style="margin-top:4px;" onclick="loadPatternImportSource()">Load Patterns</button>
+                    <div id="patternImportInfo" style="margin-top:4px;color:#8c8c8c;font-size:10px;"></div>
+                </div>
+                <div class="pattern-import-list" id="patternImportList"></div>
+                <div class="pattern-import-status" id="patternImportStatus">Load a source project to choose patterns.</div>
+            </div>
+            <div class="modal-actions">
+                <button id="importPatternsBtn" onclick="importSelectedPatterns()" disabled>Import Selected</button>
+                <button onclick="closePatternImport()">Cancel</button>
+            </div>
+        </div>
+    </div>
     <div id="importSongModal" class="modal">
         <div class="modal-content" style="max-width:500px;">
             <div class="modal-header">Import Song from Another Project</div>
