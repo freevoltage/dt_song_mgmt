@@ -192,6 +192,9 @@
         }
         .song-name:hover { color: #d4652f; }
         .song-meta { color: #6e6e6e; font-size: 10px; }
+        .song-pattern-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px 12px; border-bottom: 1px solid #202020; color: #777; }
+        .song-pattern-summary-label { margin-right: 3px; }
+        .song-pattern-chip { color: #c5c5c5; background: #1b1b1b; border: 1px solid #303030; padding: 1px 5px; border-radius: 2px; }
         .song-actions { display: flex; gap: 4px; }
         .song-actions button { padding: 3px 8px; font-size: 10px; }
         
@@ -466,6 +469,13 @@
             content.innerHTML = '';
             if (!state) return;
             state.songs.forEach(song => {
+                const usedPatternIndices = [...new Set(song.rows.map(row => row.pattern))];
+                const usedPatterns = usedPatternIndices.map(index => {
+                    const pattern = patterns.find(item => item.index === index);
+                    if (!pattern) return `<span class="song-pattern-chip">${escapeHtml(String(index))}</span>`;
+                    const customName = pattern.name && pattern.name !== pattern.label ? ` · ${escapeHtml(pattern.name)}` : '';
+                    return `<span class="song-pattern-chip" title="${escapeHtml(pattern.name || pattern.label)}">${pattern.label}${customName}</span>`;
+                }).join('');
                 const card = document.createElement('div');
                 card.className = 'song-panel-card';
                 card.draggable = true;
@@ -538,6 +548,7 @@
                             <button onclick="emptySong(${song.slot})">Empty Slot</button>
                         </div>
                     </div>
+                    <div class="song-pattern-summary"><span class="song-pattern-summary-label">Patterns used:</span>${usedPatterns || '<span>none</span>'}</div>
                     <table class="rows-table" id="rows-${song.slot}">
                         <thead>
                             <tr>
