@@ -49,6 +49,13 @@ PATTERN_NAME_OFF_DN2 = 0x15AD4
 PATTERN_NAME_OFF = PATTERN_NAME_OFF_DT2
 PATTERN_NAME_LEN = 16
 
+# Each pattern slot has a corresponding kit slot. Kits hold the track sound
+# presets, so moving a pattern without its kit leaves it playing defaults or
+# the destination's old sounds.
+KIT_BASE = 0xAE0200
+KIT_STRIDE_DN2 = 0x2A00
+KIT_STRIDE_DT2 = 0x5800
+
 DN2_IMAGE_SIZE = 0xC4B004
 DT2_IMAGE_SIZE = 0xDD9604
 
@@ -77,6 +84,9 @@ def device_name(raw: bytes, project_suffix: str | None = None) -> str:
 
 def pattern_name_offset(raw: bytes) -> int:
     return PATTERN_NAME_OFF_DN2 if device_name(raw) == "DN2" else PATTERN_NAME_OFF_DT2
+
+def kit_stride(raw: bytes) -> int:
+    return KIT_STRIDE_DN2 if device_name(raw) == "DN2" else KIT_STRIDE_DT2
 
 PAYLOAD_HEAD_MAGIC = bytes.fromhex("ac11d303")
 PAYLOAD_TAIL_MAGIC = bytes.fromhex("aaa1daaa")

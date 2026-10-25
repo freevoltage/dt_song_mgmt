@@ -1,6 +1,6 @@
 """Pattern operations."""
 
-from .constants import PATTERN_BASE, PATTERN_NAME_LEN, PATTERN_SLOTS, PATTERN_STRIDE, pattern_name_offset
+from .constants import KIT_BASE, PATTERN_BASE, PATTERN_NAME_LEN, PATTERN_SLOTS, PATTERN_STRIDE, kit_stride, pattern_name_offset
 from .songs import get_song_rows, get_song_slots, pattern_label, retarget_rows, set_song_slots
 
 
@@ -52,7 +52,17 @@ def copy_pattern_block(raw: bytes, src_idx: int, dst_idx: int) -> bytes:
     base_src = PATTERN_BASE + src_idx * PATTERN_STRIDE
     base_dst = PATTERN_BASE + dst_idx * PATTERN_STRIDE
     patched[base_dst : base_dst + PATTERN_STRIDE] = raw[base_src : base_src + PATTERN_STRIDE]
+    _copy_kit_block(raw, patched, src_idx, dst_idx)
     return bytes(patched)
+
+
+def _copy_kit_block(source_raw: bytes, target: bytearray, src_idx: int, dst_idx: int) -> None:
+    stride = kit_stride(source_raw)
+    src_start = KIT_BASE + src_idx * stride
+    dst_start = KIT_BASE + dst_idx * stride
+    if src_start + stride > len(source_raw) or dst_start + stride > len(target):
+        raise ValueError("project image is too short to contain the selected pattern's kit")
+    target[dst_start : dst_start + stride] = source_raw[src_start : src_start + stride]
 
 
 def validate_pattern_mapping(mappings: list[dict]) -> list[tuple[int, int]]:
@@ -81,8 +91,10 @@ def validate_pattern_mapping(mappings: list[dict]) -> list[tuple[int, int]]:
 
 
 def copy_pattern_blocks(source_raw: bytes, target_raw: bytes, mappings: list[dict]) -> bytes:
-    """Copy complete pattern containers between compatible project images."""
+    """Copy patterns and their corresponding sound kits between projects."""
     pairs = validate_pattern_mapping(mappings)
+    if kit_stride(source_raw) != kit_stride(target_raw):
+        raise ValueError("source and target projects use incompatible kit formats")
     patched = bytearray(target_raw)
     for src_idx, dst_idx in pairs:
         src_start = PATTERN_BASE + src_idx * PATTERN_STRIDE
@@ -92,6 +104,7 @@ def copy_pattern_blocks(source_raw: bytes, target_raw: bytes, mappings: list[dic
         if src_end > len(source_raw) or dst_end > len(patched):
             raise ValueError("project image is too short to contain the selected pattern")
         patched[dst_start:dst_end] = source_raw[src_start:src_end]
+        _copy_kit_block(source_raw, patched, src_idx, dst_idx)
     return bytes(patched)
 
 
@@ -102,6 +115,11 @@ def clear_pattern(raw: bytes, pat_idx: int) -> bytes:
     base = PATTERN_BASE + pat_idx * PATTERN_STRIDE
     # keep first few bytes? just zero block
     patched[base : base + PATTERN_STRIDE] = bytes(PATTERN_STRIDE)
+    stride = kit_stride(raw)
+    kit_start = KIT_BASE + pat_idx * stride
+    if kit_start + stride > len(patched):
+        raise ValueError("project image is too short to contain the selected pattern's kit")
+    patched[kit_start : kit_start + stride] = bytes(stride)
     return bytes(patched)
 
 
@@ -121,6 +139,12 @@ def swap_patterns(raw: bytes, pat_a: int, pat_b: int) -> bytes:
     tmp = bytes(patched[base_a : base_a + PATTERN_STRIDE])
     patched[base_a : base_a + PATTERN_STRIDE] = patched[base_b : base_b + PATTERN_STRIDE]
     patched[base_b : base_b + PATTERN_STRIDE] = tmp
+    stride = kit_stride(raw)
+    kit_a = KIT_BASE + pat_a * stride
+    kit_b = KIT_BASE + pat_b * stride
+    tmp_kit = bytes(patched[kit_a : kit_a + stride])
+    patched[kit_a : kit_a + stride] = patched[kit_b : kit_b + stride]
+    patched[kit_b : kit_b + stride] = tmp_kit
     return bytes(patched)
 
 
