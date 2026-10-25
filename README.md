@@ -42,6 +42,22 @@ dsm project.dt2prj restore ./SONGS_<stem> NEW_NAME
 
 Files are matched by the `NN_` slot prefix (`00`–`15`). Missing slots are cleared to empty songs — the folder is treated as the full 16-slot setlist.
 
+## Web editor
+
+Open a project in the browser:
+
+```bash
+dsm project.dt2prj web
+```
+
+DSM prefers port 8080 and automatically tries the next available port if another project is already open. To require a specific port, pass `--port`:
+
+```bash
+dsm project.dn2prj web --port 8090
+```
+
+If that port is occupied, DSM reports the conflict and exits. Each running project has its own browser address and can be opened beside another project.
+
 ## TODO
 
 - **Song row labels** — Digitakt LABEL (`INTRO`, `VERSE`, pattern name, …) is still not mapped correctly from the 29-byte row. Hidden in `songs.html` until the tag/byte mapping matches the device.

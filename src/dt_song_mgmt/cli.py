@@ -16,8 +16,18 @@ def main(argv: list[str] | None = None) -> None:
         argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
         print("Elektron Digi Song Mode Manager (dsm)", file=sys.stderr)
-        print("Usage: dsm <project> [info|rows|restore|web] ...", file=sys.stderr)
+        print("Usage: dsm <project> [info|rows|restore|web] ... | dsm launch | dsm stop", file=sys.stderr)
         raise SystemExit(0 if argv and argv[0] in ("-h", "--help") else 2)
+
+    if argv[0] == "launch":
+        from .launcher import launch
+        launch()
+        return
+    if argv[0] == "stop":
+        from .launcher import stop_servers
+        stopped = stop_servers()
+        print(f"Stopped {stopped} DSM server{'s' if stopped != 1 else ''} launched by the app.")
+        return
 
     prj = Path(argv[0]).expanduser().resolve()
     if not prj.is_file():
@@ -63,14 +73,16 @@ def main(argv: list[str] | None = None) -> None:
         return
     elif cmd == "web":
         port = 8080
+        port_explicit = False
         i = 2
         while i < len(argv):
             if argv[i] == "--port" and i + 1 < len(argv):
                 port = int(argv[i + 1])
+                port_explicit = True
                 i += 2
                 continue
             i += 1
-        run_web_server(prj, port)
+        run_web_server(prj, port, auto_port=not port_explicit)
         return
     else:
         raise SystemExit("unknown command")

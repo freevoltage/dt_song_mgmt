@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import json
 import shutil
 import base64
+import errno
 from urllib.parse import quote
 
 from ..patterns import get_all_patterns_info, rename_pattern, copy_pattern_block, copy_pattern_blocks, validate_pattern_mapping, clear_pattern, swap_patterns, move_pattern, retarget_all_pattern_refs
@@ -403,10 +404,24 @@ def create_handler(prj: Path):
     return Handler
 
 
-def run_web_server(prj: Path, port: int = 8080):
+def run_web_server(prj: Path, port: int = 8080, auto_port: bool = True):
     handler = create_handler(prj)
-    server = HTTPServer(('127.0.0.1', port), handler)
+    requested_port = port
+    server = None
+    candidates = [port] if not auto_port or port == 0 else range(port, min(port + 1000, 65536))
+    for candidate in candidates:
+        try:
+            server = HTTPServer(('127.0.0.1', candidate), handler)
+            break
+        except OSError as exc:
+            if not auto_port or exc.errno != errno.EADDRINUSE:
+                raise SystemExit(f'Cannot start DSM on port {candidate}: {exc}') from exc
+    if server is None:
+        raise SystemExit(f'No available port found from {requested_port} through {min(requested_port + 999, 65535)}.')
+    port = server.server_address[1]
     url = f'http://127.0.0.1:{port}'
+    if port != requested_port:
+        print(f'Port {requested_port} is already in use; using port {port}.')
     print(f'Starting server at {url}')
     print('Press Ctrl+C to stop')
     try:
