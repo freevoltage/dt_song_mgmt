@@ -11,6 +11,7 @@ Python 3.10 or newer. No runtime dependencies are required.
 From the project root, install the command in editable mode:
 
 ```bash
+uv tool uninstall dt-song-mgmt  # only if replacing the earlier package
 uv tool install --editable .
 ```
 
