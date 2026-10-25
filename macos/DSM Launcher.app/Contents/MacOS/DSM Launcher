@@ -1,0 +1,10 @@
+#!/bin/sh
+
+for dsm_command in "$HOME/.local/bin/dsm" /opt/homebrew/bin/dsm /usr/local/bin/dsm; do
+    if [ -x "$dsm_command" ]; then
+        exec "$dsm_command" launch
+    fi
+done
+
+osascript -e 'display dialog "DSM is not installed. Install it with: uv tool install --editable ." buttons {"OK"} default button "OK"'
+exit 1

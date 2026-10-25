@@ -58,6 +58,12 @@ dsm project.dn2prj web --port 8090
 
 If that port is occupied, DSM reports the conflict and exits. Each running project has its own browser address and can be opened beside another project.
 
+### macOS launcher
+
+Open `macos/DSM Launcher.app` from Finder to choose a project and open it in the browser without leaving a Terminal window running. Open the launcher again to start another project in its own browser window. Choose **Stop app-launched servers** from the launcher menu when you are finished.
+
+The same launcher is available from Terminal with `dsm launch`. To stop its servers from Terminal, run `dsm stop`. These stop only servers started by the launcher; a server started with `dsm <project> web` remains under that Terminal session's control.
+
 ## TODO
 
 - **Song row labels** — Digitakt LABEL (`INTRO`, `VERSE`, pattern name, …) is still not mapped correctly from the 29-byte row. Hidden in `songs.html` until the tag/byte mapping matches the device.

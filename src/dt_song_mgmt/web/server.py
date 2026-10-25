@@ -425,7 +425,7 @@ def run_web_server(prj: Path, port: int = 8080, auto_port: bool = True):
     print(f'Starting server at {url}')
     print('Press Ctrl+C to stop')
     try:
-        webbrowser.open(url)
+        webbrowser.open(url, new=1)
     except Exception:
         pass
     try:
