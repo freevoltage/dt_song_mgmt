@@ -469,13 +469,6 @@
             content.innerHTML = '';
             if (!state) return;
             state.songs.forEach(song => {
-                const usedPatternIndices = [...new Set(song.rows.map(row => row.pattern))];
-                const usedPatterns = usedPatternIndices.map(index => {
-                    const pattern = patterns.find(item => item.index === index);
-                    if (!pattern) return `<span class="song-pattern-chip">${escapeHtml(String(index))}</span>`;
-                    const customName = pattern.name && pattern.name !== pattern.label ? ` · ${escapeHtml(pattern.name)}` : '';
-                    return `<span class="song-pattern-chip" title="${escapeHtml(pattern.name || pattern.label)}">${pattern.label}${customName}</span>`;
-                }).join('');
                 const card = document.createElement('div');
                 card.className = 'song-panel-card';
                 card.draggable = true;
@@ -533,6 +526,13 @@
             const list = document.getElementById('songsList');
             list.innerHTML = '';
             state.songs.forEach(song => {
+                const usedPatternIndices = [...new Set(song.rows.map(row => row.pattern))];
+                const usedPatterns = usedPatternIndices.map(index => {
+                    const pattern = patterns.find(item => item.index === index);
+                    if (!pattern) return `<span class="song-pattern-chip">${escapeHtml(String(index))}</span>`;
+                    const customName = pattern.name && pattern.name !== pattern.label ? ` · ${escapeHtml(pattern.name)}` : '';
+                    return `<span class="song-pattern-chip" title="${escapeHtml(pattern.name || pattern.label)}">${pattern.label}${customName}</span>`;
+                }).join('');
                 const card = document.createElement('div');
                 card.className = 'song-card' + (song.row_count === 0 ? ' empty' : '');
                 card.innerHTML = `
