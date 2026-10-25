@@ -672,6 +672,7 @@
                     card.className = 'pattern-card' + (pat.ref_count === 0 ? ' empty' : '');
                     card.draggable = true;
                     card.dataset.patIdx = pat.index;
+                    card.title = 'Drag onto another pattern to stage a move. Hold Shift while dropping for copy and swap options.';
                     card.innerHTML = `
                         <span class="pattern-label">${pat.label}</span>
                         <span class="pattern-name ${pat.name ? '' : 'empty'}" title="${escapeHtml(pat.name || '')}">${pat.name || '(unnamed)'}</span>
@@ -700,7 +701,8 @@
                         card.style.borderColor = '#252525';
                         const srcIdx = parseInt(e.dataTransfer.getData('pattern'));
                         if (srcIdx !== pat.index) {
-                            patternDropOnPattern(srcIdx, pat.index);
+                            if (e.shiftKey) patternDropOnPattern(srcIdx, pat.index);
+                            else stagePatternOperation(makePatternMoveOperation(srcIdx, pat.index));
                         }
                     });
                     list.appendChild(card);
@@ -733,21 +735,22 @@
             pendingPatternMove = null;
         }
         
-        async function doPatternMove(action) {
+        function makePatternMoveOperation(srcIdx, dstIdx) {
+            const affected = [];
+            state.songs.forEach(song => song.rows.forEach((row, rowIdx) => {
+                if (row.pattern === srcIdx) affected.push({slot: song.slot, row_idx: rowIdx, from: srcIdx, to: dstIdx});
+            }));
+            return {type: 'pattern_move', src_idx: srcIdx, dst_idx: dstIdx, affected};
+        }
+
+        function doPatternMove(action) {
             if (!pendingPatternMove) return;
             const {srcIdx, dstIdx} = pendingPatternMove;
             let op;
             if (action === 'copy') op = {type: 'pattern_copy', src_idx: srcIdx, dst_idx: dstIdx};
-            else if (action === 'move') {
-                const affected = [];
-                state.songs.forEach(song => song.rows.forEach((row, rowIdx) => {
-                    if (row.pattern === srcIdx) affected.push({slot: song.slot, row_idx: rowIdx, from: srcIdx, to: dstIdx});
-                }));
-                op = {type: 'pattern_move', src_idx: srcIdx, dst_idx: dstIdx, affected};
-            } else if (action === 'swap') op = {type: 'pattern_swap', pat_a: srcIdx, pat_b: dstIdx};
+            else if (action === 'move') op = makePatternMoveOperation(srcIdx, dstIdx);
+            else if (action === 'swap') op = {type: 'pattern_swap', pat_a: srcIdx, pat_b: dstIdx};
             closePatternModal();
-            const dst = patterns.find(p => p.index === dstIdx);
-            if (!confirm(`${action[0].toUpperCase() + action.slice(1)} pattern ${patterns.find(p => p.index === srcIdx).label} into ${dst.label}? This is staged until you click Apply Changes.`)) return;
             stagePatternOperation(op);
         }
         
@@ -1354,7 +1357,8 @@
                 `- Import Song Backup restores that file into a chosen slot; pattern data stays untouched.\n\n` +
                 `- Use Empty Slot to clear the slot after saving a backup.\n\n` +
                 `Tips:\n` +
-                `- Drag patterns from Pattern Manager onto rows to retarget.\n` +
+                `- Drag a pattern onto another pattern to stage a move without a dialog. Hold Shift while dropping for copy/swap options.\n` +
+                `- Drag patterns from Pattern Manager onto song rows to retarget.\n` +
                 `- Drag songs in Song Slots to swap positions.\n` +
                 `- Use checkboxes + Shift for bulk selection.\n` +
                 `- Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z for undo/redo.`;
