@@ -64,6 +64,12 @@ Open `macos/DSM Launcher.app` from Finder to choose a project and open it in the
 
 The same launcher is available from Terminal with `dsm launch`. To stop its servers from Terminal, run `dsm stop`. These stop only servers started by the launcher; a server started with `dsm <project> web` remains under that Terminal session's control.
 
+### Full JSON project snapshots
+
+**Export Full JSON** stores the complete uncompressed project image in a JSON envelope with readable song/pattern details and a checksum. It includes all pattern data and all song slots, including row mutes, and includes currently staged changes. **Restore JSON** stages the snapshot for the open project; it must match the current device type and project image size. Clicking **Apply Changes** creates the normal `.bak` first. External archive assets (such as sample files stored outside the project image) remain from the open project.
+
+Older arrangement-only JSON exports can still restore all songs and their row mutes, but they do not contain pattern data. Those files leave the current project patterns in place.
+
 ## TODO
 
 - **Song row labels** — Digitakt LABEL (`INTRO`, `VERSE`, pattern name, …) is still not mapped correctly from the 29-byte row. Hidden in `songs.html` until the tag/byte mapping matches the device.

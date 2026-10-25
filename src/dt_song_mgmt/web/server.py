@@ -8,11 +8,13 @@ import json
 import shutil
 import base64
 import errno
+import hashlib
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 from ..patterns import get_all_patterns_info, rename_pattern, copy_pattern_block, copy_pattern_blocks, validate_pattern_mapping, clear_pattern, swap_patterns, move_pattern, retarget_all_pattern_refs
 from ..project import pack_project, read_project, unpack_project, payload_name
-from ..songs import get_song_slots, get_song_info, get_all_songs_info, collect_pattern_names, song_name, SONG_SLOTS, SONG_SIZE
+from ..songs import get_song_slots, get_song_info, get_all_songs_info, collect_pattern_names, song_name, restore_song_arrangement, SONG_SLOTS, SONG_SIZE
 from ..state import apply_operations, get_project_state
 from ..constants import device_name
 
@@ -21,7 +23,27 @@ def create_handler(prj: Path):
     class Handler(BaseHTTPRequestHandler):
         def _apply_staged_operations(self, raw, operations):
             for op in operations:
-                if op.get('type') == 'pattern_import':
+                if op.get('type') == 'project_restore':
+                    if op.get('backup_format') != 'dsm-project-state' or op.get('version') != 1:
+                        raise ValueError('unsupported DSM project backup format')
+                    if op.get('device') != device_name(raw, prj.suffix):
+                        raise ValueError('project backup must match the current device type')
+                    try:
+                        restored = base64.b64decode(op['image_base64'], validate=True)
+                    except (KeyError, ValueError, TypeError):
+                        raise ValueError('project backup image is missing or invalid') from None
+                    if len(restored) != len(raw) or op.get('image_length') != len(restored):
+                        raise ValueError('project backup image size does not match this project')
+                    if hashlib.sha256(restored).hexdigest() != op.get('image_sha256'):
+                        raise ValueError('project backup image checksum does not match')
+                    if device_name(restored, prj.suffix) != device_name(raw, prj.suffix):
+                        raise ValueError('project backup image is not for the current device type')
+                    get_song_slots(restored)
+                    get_all_patterns_info(restored)
+                    raw = restored
+                elif op.get('type') == 'arrangement_restore':
+                    raw = restore_song_arrangement(raw, op.get('songs'))
+                elif op.get('type') == 'pattern_import':
                     src_path = Path(op['src_path']).expanduser().resolve()
                     if src_path == prj.expanduser().resolve():
                         raise ValueError('choose a different source project')
@@ -134,7 +156,31 @@ def create_handler(prj: Path):
             parsed = urlparse(self.path)
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode()
-            if parsed.path == '/api/preview':
+            if parsed.path == '/api/export-json':
+                try:
+                    data = json.loads(body)
+                    manifest, payload, _members = read_project(prj)
+                    head, raw = unpack_project(payload)
+                    raw = self._apply_staged_operations(raw, data.get('operations', []))
+                    songs = get_all_songs_info(raw)
+                    patterns = get_all_patterns_info(raw)
+                    self._send_json({
+                        'backup_format': 'dsm-project-state',
+                        'version': 1,
+                        'project_file': prj.name,
+                        'project_name': payload_name(manifest),
+                        'device': device_name(raw, prj.suffix),
+                        'exported_at': datetime.now(timezone.utc).isoformat(),
+                        'image_encoding': 'base64',
+                        'image_length': len(raw),
+                        'image_sha256': hashlib.sha256(raw).hexdigest(),
+                        'image_base64': base64.b64encode(raw).decode('ascii'),
+                        'songs': songs,
+                        'patterns': patterns,
+                    })
+                except Exception as e:
+                    self._send_json({'error': str(e)}, 400)
+            elif parsed.path == '/api/preview':
                 try:
                     data = json.loads(body)
                     ops = data.get('operations', [])
@@ -394,7 +440,6 @@ def create_handler(prj: Path):
                     sman, spayload, _ = read_project(src_path)
                     shead, sraw = unpack_project(spayload)
                     info = get_all_songs_info(sraw)
-                    from ..constants import device_name
                     self._send_json({'songs': info, 'device': device_name(sraw, src_path.suffix), 'project_file': src_path.name})
                 except Exception as e:
                     self._send_json({'error': str(e)}, 500)

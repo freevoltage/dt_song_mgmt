@@ -314,6 +314,74 @@ def set_song_slots(raw: bytes, slots: list[bytes]) -> bytes:
     return bytes(patched)
 
 
+def restore_song_arrangement(raw: bytes, songs: list[dict]) -> bytes:
+    """Restore the structured song data from a legacy arrangement JSON export."""
+    if not isinstance(songs, list) or len(songs) != SONG_SLOTS:
+        raise ValueError(f"arrangement backup must contain all {SONG_SLOTS} song slots")
+    slots = get_song_slots(raw)
+    seen = set()
+    for saved in songs:
+        if not isinstance(saved, dict):
+            raise ValueError("each saved song must be an object")
+        slot_idx = saved.get("slot")
+        if isinstance(slot_idx, bool) or not isinstance(slot_idx, int) or not 0 <= slot_idx < SONG_SLOTS or slot_idx in seen:
+            raise ValueError("arrangement backup contains an invalid or duplicate song slot")
+        seen.add(slot_idx)
+        saved_rows = saved.get("rows")
+        if not isinstance(saved_rows, list) or len(saved_rows) > SONG_ROW_MAX:
+            raise ValueError(f"song slot {slot_idx} has an invalid row list")
+        old_rows = get_song_rows(slots[slot_idx])
+        rows = []
+        for row_idx, saved_row in enumerate(saved_rows):
+            if not isinstance(saved_row, dict):
+                raise ValueError(f"song slot {slot_idx} row {row_idx + 1} is invalid")
+            row = old_rows[row_idx] if row_idx < len(old_rows) else bytearray(SONG_ROW_SIZE)
+            values = {
+                "pattern": saved_row.get("pattern", 0),
+                "label_idx": saved_row.get("label_idx", 0),
+                "repeat": saved_row.get("repeat", 1),
+                "bpm_raw": saved_row.get("bpm_raw", 0),
+                "mute_mask": saved_row.get("mute_mask", saved_row.get("mute", 0)),
+                "length": saved_row.get("length", 64),
+            }
+            if any(isinstance(value, bool) or not isinstance(value, int) for value in values.values()):
+                raise ValueError(f"song slot {slot_idx} row {row_idx + 1} contains a non-integer value")
+            if not 0 <= values["pattern"] < PATTERN_SLOTS or not 0 <= values["label_idx"] <= 255:
+                raise ValueError(f"song slot {slot_idx} row {row_idx + 1} has an invalid pattern or label")
+            if not 0 <= values["repeat"] <= 255 or not 0 <= values["bpm_raw"] <= 0xFFFFFFFF:
+                raise ValueError(f"song slot {slot_idx} row {row_idx + 1} has an invalid repeat or tempo")
+            if not 0 <= values["mute_mask"] <= 0xFFFF or not 0 <= values["length"] <= 0xFFFF:
+                raise ValueError(f"song slot {slot_idx} row {row_idx + 1} has an invalid mute mask or length")
+            row[0] = values["pattern"]
+            row[1] = values["label_idx"]
+            row[2] = values["repeat"]
+            struct.pack_into(">I", row, 3, values["bpm_raw"])
+            row[7] = values["mute_mask"] & 0xFF
+            row[8] = (values["mute_mask"] >> 8) & 0xFF
+            struct.pack_into(">H", row, 9, values["length"])
+            rows.append(row)
+        slot = set_song_rows(slots[slot_idx], rows)
+        name = saved.get("name", "")
+        if not isinstance(name, str):
+            raise ValueError(f"song slot {slot_idx} name must be text")
+        slot = rename_song(slot, "" if name == "EMPTY" and not rows else name)
+        default_bpm = saved.get("default_bpm")
+        if default_bpm is None:
+            patched_slot = bytearray(slot)
+            struct.pack_into(">H", patched_slot, SONG_TEMPO_OFF, 0)
+            slot = bytes(patched_slot)
+        elif isinstance(default_bpm, bool) or not isinstance(default_bpm, int) or not 0 <= default_bpm <= 300:
+            raise ValueError(f"song slot {slot_idx} has an invalid default tempo")
+        else:
+            patched_slot = bytearray(slot)
+            struct.pack_into(">H", patched_slot, SONG_TEMPO_OFF, default_bpm * BPM_SCALE)
+            slot = bytes(patched_slot)
+        slots[slot_idx] = slot
+    if seen != set(range(SONG_SLOTS)):
+        raise ValueError("arrangement backup must include every song slot")
+    return set_song_slots(raw, slots)
+
+
 def get_song_rows(rec: bytes) -> list[bytearray]:
     count = song_row_count(rec)
     rows = []

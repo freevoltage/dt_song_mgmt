@@ -397,8 +397,9 @@
             <button id="togglePatternBtn" onclick="togglePatternPanel()">Hide Patterns</button>
             <button onclick="undo()" id="undoBtn" disabled>Undo</button>
             <button onclick="redo()" id="redoBtn" disabled>Redo</button>
-            <button onclick="exportArrangement()">Export JSON</button>
-            <button onclick="importArrangement()">Import JSON</button>
+            <button onclick="exportArrangement()">Export Full JSON</button>
+            <button onclick="importArrangement()">Restore JSON</button>
+            <input id="projectBackupFile" type="file" accept=".json,application/json" hidden onchange="restoreArrangementJson(event)">
             <button onclick="showImportSong()">Import Song from Project</button>
             <button onclick="importSongBackup()">Import Song Backup</button>
             <input id="songBackupFile" type="file" accept=".bin,application/octet-stream" hidden onchange="restoreSongBackup(event)">
@@ -502,6 +503,9 @@
         const collapsedPatternBanks = new Set();
         let songNameBase = {};
         let pendingNameEdit = null;
+        let preRestoreState = null;
+        let preRestorePatterns = null;
+        let preRestoreSongNames = null;
         let operations = [];
         let undoStack = [];
         let redoStack = [];
@@ -1114,6 +1118,7 @@
             if (data.ok || data.success) {
                 alert('Changes applied successfully! Backup: ' + data.backup);
                 operations = []; undoStack = []; redoStack = []; selectedRows.clear(); document.getElementById('applyBtn').disabled = true; hideDiff(); updateUndoRedo();
+                preRestoreState = null; preRestorePatterns = null; preRestoreSongNames = null;
                 await loadState();
                 render();
             } else { alert('Error: ' + data.error); }
@@ -1153,6 +1158,20 @@
         function syncPatternOperationRefs(previous, next) {
             let common = 0;
             while (common < previous.length && common < next.length && JSON.stringify(previous[common]) === JSON.stringify(next[common])) common++;
+            const removedRestore = previous.slice(common).find(op => op.type === 'project_restore' || op.type === 'arrangement_restore');
+            const addedRestore = next.slice(common).find(op => op.type === 'project_restore' || op.type === 'arrangement_restore');
+            if (removedRestore && !next.some(op => op.type === 'project_restore' || op.type === 'arrangement_restore')) {
+                if (preRestoreState) state = JSON.parse(JSON.stringify(preRestoreState));
+                if (preRestorePatterns) patternBase = preRestorePatterns.map(p => ({...p}));
+                if (preRestoreSongNames) songNameBase = {...preRestoreSongNames};
+                preRestoreState = null;
+                preRestorePatterns = null;
+                preRestoreSongNames = null;
+            } else if (addedRestore) {
+                state.songs = JSON.parse(JSON.stringify(addedRestore.preview_songs));
+                patternBase = addedRestore.preview_patterns.map(p => ({...p}));
+                songNameBase = Object.fromEntries(state.songs.map(song => [song.slot, song.name]));
+            }
             previous.slice(common).reverse().forEach(op => {
                 if (op.type === 'pattern_move') (op.affected || []).forEach(ref => {
                     const song = state.songs.find(item => item.slot === ref.slot);
@@ -1162,36 +1181,88 @@
             next.slice(common).forEach(op => applyPatternPreviewEffects([op]));
             rebuildPatternPreview();
         }
-        function exportArrangement() {
+        async function exportArrangement() {
             if (!state) return;
-            const data = {project: state.project_name, songs: state.songs};
-            const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = (state.project_name || 'arrangement') + '.json';
-            a.click();
-            URL.revokeObjectURL(url);
+            try {
+                const res = await fetch('/api/export-json', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({operations})
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) throw new Error(data.error || `Export failed (${res.status})`);
+                const blob = new Blob([JSON.stringify(data)], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = (state.project_file || 'project').replace(/\.(dt2prj|dn2prj)$/i, '') + '.dsm.json';
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (err) {
+                alert(`Could not export project JSON: ${err.message}`);
+            }
         }
         function importArrangement() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json,application/json';
-            input.onchange = e => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = ev => {
-                    try {
-                        const data = JSON.parse(ev.target.result);
-                        alert('Imported arrangement (preview not auto-applied). Use API or manual editing.');
-                    } catch(ex) {
-                        alert('Invalid JSON');
-                    }
-                };
-                reader.readAsText(file);
-            };
-            input.click();
+            document.getElementById('projectBackupFile').value = '';
+            document.getElementById('projectBackupFile').click();
+        }
+
+        async function restoreArrangementJson(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            try {
+                const data = JSON.parse(await file.text());
+                let restoreOp;
+                let legacyArrangementOnly = false;
+                if (data.backup_format === 'dsm-project-state' && data.version === 1) {
+                    restoreOp = {
+                        type: 'project_restore', backup_format: data.backup_format, version: data.version,
+                        project_file: data.project_file, project_name: data.project_name, device: data.device,
+                        image_length: data.image_length, image_sha256: data.image_sha256, image_base64: data.image_base64,
+                    };
+                } else if (Array.isArray(data.songs) && data.songs.length === 16) {
+                    legacyArrangementOnly = true;
+                    restoreOp = {type: 'arrangement_restore', songs: data.songs, project_name: data.project || ''};
+                } else {
+                    throw new Error('This file is not a supported DSM JSON backup.');
+                }
+                const previewRes = await fetch('/api/preview', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({operations: [restoreOp]})
+                });
+                const preview = await previewRes.json();
+                if (!previewRes.ok || preview.error) throw new Error(preview.error || 'Could not validate this backup for the current project.');
+                restoreOp.preview_songs = preview.songs;
+                restoreOp.preview_patterns = preview.patterns;
+                const warning = legacyArrangementOnly
+                    ? '\n\nThis is an older arrangement-only export. It restores all song rows and mutes, but contains no pattern data; the current project patterns will be kept.'
+                    : `\n\nThis restores every pattern and all song data, including row mutes, from ${data.project_file}.`;
+                const pending = operations.length ? '\n\nCurrent staged changes will be replaced.' : '';
+                const archiveNote = !legacyArrangementOnly
+                    ? `\n\nArchive assets stored outside the project image, such as samples, remain from the current ${state.project_file} file.` : '';
+                const sourceNote = !legacyArrangementOnly && data.project_file !== state.project_file
+                    ? ` The snapshot originated from ${data.project_file}.` : '';
+                if (!confirm(`Stage restore from ${file.name}?${warning}${sourceNote}${archiveNote}${pending}\n\nNothing is written until you click Apply Changes; applying creates a backup.`)) return;
+
+                if (!preRestoreState) {
+                    preRestoreState = JSON.parse(JSON.stringify(state));
+                    preRestorePatterns = patternBase.map(p => ({...p}));
+                    preRestoreSongNames = {...songNameBase};
+                }
+                undoStack = [JSON.parse(JSON.stringify(operations))];
+                redoStack = [];
+                operations = [restoreOp];
+                state.songs = JSON.parse(JSON.stringify(preview.songs));
+                patternBase = preview.patterns.map(p => ({...p}));
+                songNameBase = Object.fromEntries(state.songs.map(song => [song.slot, song.name]));
+                selectedRows.clear();
+                document.getElementById('applyBtn').disabled = false;
+                updateUndoRedo();
+                render();
+            } catch (err) {
+                alert(`Could not restore JSON: ${err.message}`);
+            } finally {
+                event.target.value = '';
+            }
         }
         let importSongState = {srcPath: '', songs: [], srcSlot: null, dstSlot: null};
         async function exportSong(slot) {
@@ -1411,14 +1482,14 @@
             } catch(e) { alert(e.message); }
         }
         function showHelp() {
-            const msg = `JSON Export / Import\n\n` +
-                `Export JSON:\n` +
-                `- Saves current view as JSON with project name and all songs/rows.\n` +
-                `- Use this as a backup/snapshot or to share arrangements.\n\n` +
-                `Import JSON:\n` +
-                `- Currently loads the file for inspection only (not auto-applied).\n` +
-                `- To actually apply changes, edit the project using the UI controls (drag/drop, retarget, bulk edit) and click Apply Changes.\n` +
-                `- Apply Changes writes to the .dt2prj file with automatic .bak backup.\n\n` +
+            const msg = `Full Project JSON Backup\n\n` +
+                `Export Full JSON:\n` +
+                `- Saves all 128 patterns and all 16 songs with row mutes, plus readable song/pattern details.\n` +
+                `- Includes staged changes as they currently appear in the editor.\n\n` +
+                `Restore JSON:\n` +
+                `- Validates and stages a full backup restore for the matching device/project image size.\n` +
+                `- Older arrangement-only JSON files can restore songs and row mutes, but do not contain pattern data.\n` +
+                `- Click Apply Changes to write the restore; DSM creates a .bak first.\n\n` +
                 `Import Song from Project:\n` +
                 `- Copies only song mode data (rows, mutes, repeats, etc.) from another project into a target slot.\n` +
                 `- It never copies pattern data. Imported rows point to the same pattern slot numbers in the current project, so they use its current patterns.\n\n` +
@@ -1437,7 +1508,7 @@
                 `- Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z for undo/redo.`;
             alert(msg);
         }
-        function reload() { operations = []; undoStack = []; redoStack = []; selectedRows.clear(); document.getElementById('applyBtn').disabled = true; hideDiff(); loadState(); updateUndoRedo(); }
+        function reload() { operations = []; undoStack = []; redoStack = []; preRestoreState = null; preRestorePatterns = null; preRestoreSongNames = null; selectedRows.clear(); document.getElementById('applyBtn').disabled = true; hideDiff(); loadState(); updateUndoRedo(); }
         function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text || ''; return div.innerHTML; }
         
         document.addEventListener('keydown', e => {
