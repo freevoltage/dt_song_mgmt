@@ -697,7 +697,7 @@
                     card.className = 'pattern-card' + (pat.ref_count === 0 ? ' empty' : '');
                     card.draggable = true;
                     card.dataset.patIdx = pat.index;
-                    card.title = 'Drag onto another pattern to stage a move. Hold Shift while dropping for copy and swap options.';
+                    card.title = 'Drag onto another pattern to move it and empty this slot. Hold Shift while dropping for copy and swap options.';
                     card.innerHTML = `
                         <span class="pattern-label">${pat.label}</span>
                         <span class="pattern-name ${pat.name ? '' : 'empty'}" title="${escapeHtml(pat.name || '')}">${pat.name || '(unnamed)'}</span>
@@ -837,6 +837,7 @@
                     const src = patterns.find(p => p.index === op.src_idx);
                     const dst = patterns.find(p => p.index === op.dst_idx);
                     if (src && dst) { dst.name = src.name; dst.has_custom_name = src.has_custom_name; }
+                    if (op.type === 'pattern_move' && src) { src.name = ''; src.has_custom_name = false; }
                 } else if (op.type === 'pattern_swap') {
                     const a = patterns.find(p => p.index === op.pat_a), b = patterns.find(p => p.index === op.pat_b);
                     if (a && b) { [a.name, b.name] = [b.name, a.name]; [a.has_custom_name, b.has_custom_name] = [b.has_custom_name, a.has_custom_name]; }
@@ -1429,7 +1430,7 @@
                 `- Import Song Backup restores that file into a chosen slot; pattern data stays untouched.\n\n` +
                 `- Use Empty Slot to clear the slot after saving a backup.\n\n` +
                 `Tips:\n` +
-                `- Drag a pattern onto another pattern to stage a move without a dialog. Hold Shift while dropping for copy/swap options.\n` +
+                `- Drag a pattern onto another pattern to move it there and empty the source slot. Hold Shift while dropping for copy/swap options.\n` +
                 `- Drag patterns from Pattern Manager onto song rows to retarget.\n` +
                 `- Drag songs in Song Slots to swap positions.\n` +
                 `- Use checkboxes + Shift for bulk selection.\n` +

@@ -33,6 +33,7 @@ def apply_operations(raw: bytes, operations: list[dict]) -> bytes:
             raw = copy_pattern_block(raw, op["src_idx"], op["dst_idx"])
             for slot_idx, slot_data in enumerate(slots):
                 slots[slot_idx] = retarget_rows(slot_data, from_pattern=op["src_idx"], to_pattern=op["dst_idx"])
+            raw = clear_pattern(raw, op["src_idx"])
         elif op_type == "pattern_swap":
             raw = swap_patterns(raw, op["pat_a"], op["pat_b"])
         elif op_type == "pattern_clear":

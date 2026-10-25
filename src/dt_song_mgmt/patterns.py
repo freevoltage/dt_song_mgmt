@@ -130,4 +130,4 @@ def move_pattern(raw: bytes, src_idx: int, dst_idx: int, also_retarget: bool = T
     new_raw = copy_pattern_block(raw, src_idx, dst_idx)
     if also_retarget:
         new_raw = retarget_all_pattern_refs(new_raw, src_idx, dst_idx)
-    return new_raw
+    return clear_pattern(new_raw, src_idx)
