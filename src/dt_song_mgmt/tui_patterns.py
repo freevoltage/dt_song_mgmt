@@ -78,9 +78,10 @@ class PatternManagerScreen(ModalScreen[None]):
         ("i", "import_pattern", "Import"),
     ]
 
-    def __init__(self, session):
+    def __init__(self, session, sessions=None):
         super().__init__()
         self.session = session
+        self.sessions = list(sessions or [session])
         self.selected_pattern = 0
         self.filter_text = ""
 
@@ -244,21 +245,41 @@ class PatternManagerScreen(ModalScreen[None]):
         )
 
     def action_import_pattern(self) -> None:
+        source_sessions = [item for item in self.sessions if item.path != self.session.path]
+        sources = "\n".join(
+            f"{index + 1}: {item.path.name} ({item.device}, "
+            f"{'DRAFT ' + str(len(item.operations)) if item.operations else 'CLEAN'})"
+            for index, item in enumerate(source_sessions)
+        )
+        prompt = "Enter a source tab number or project path."
+        if sources:
+            prompt += "\nOpen project tabs:\n" + sources
         self.app.push_screen(
-            PatternEntryModal("Import pattern", "Enter the source .dn2prj or .dt2prj path."),
-            self._on_import_source,
+            PatternEntryModal("Import pattern", prompt, "tab number or project path"),
+            lambda value: self._on_import_source(value, source_sessions),
         )
 
-    def _on_import_source(self, value: str | None) -> None:
+    def _on_import_source(self, value: str | None, source_sessions: list) -> None:
         if value is None or not value.strip():
             return
-        source_path = value.strip()
+        source_input = value.strip()
+        source_session = None
+        if source_input.isdigit() and 1 <= int(source_input) <= len(source_sessions):
+            source_session = source_sessions[int(source_input) - 1]
+            source_path = source_session.path
+        else:
+            from pathlib import Path
+            source_path = Path(source_input).expanduser().resolve()
+            source_session = next(
+                (item for item in self.sessions if item.path == source_path),
+                None,
+            )
         self.app.push_screen(
             PatternEntryModal("Source pattern", "Enter the source slot (A01–H16 or 0–127).", "e.g. A01"),
-            lambda slot: self._on_import_slot(source_path, slot),
+            lambda slot: self._on_import_slot(source_path, source_session, slot),
         )
 
-    def _on_import_slot(self, source_path: str, value: str | None) -> None:
+    def _on_import_slot(self, source_path, source_session, value: str | None) -> None:
         if value is None:
             return
         try:
@@ -268,9 +289,11 @@ class PatternManagerScreen(ModalScreen[None]):
             return
         destination = self.selected_pattern
         try:
+            source_raw = source_session.working_raw() if source_session is not None else None
             self.session.stage_pattern_import(
                 source_path,
                 [{"src_idx": source_slot, "dst_idx": destination}],
+                source_raw=source_raw,
             )
             self._refresh_table()
             self.app.notify(

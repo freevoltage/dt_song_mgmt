@@ -68,7 +68,9 @@ dsm project.dn2prj tui
 
 It shows the project's 16 song slots and the selected song's rows. Use the arrow keys to navigate, `Tab` to switch tables, `p` to change the selected row's pattern, `d` to delete a row, `u` to undo the last staged edit, and `Ctrl+S` to review and apply changes. Applying creates a `.bak` first. If you quit with pending edits, the TUI offers to apply, discard, or stay.
 
-Press `F2` to open Pattern Manager. There you can filter with `/`, then copy (`c`), move (`m`), clear (`d`), rename (`r`), or import (`i`) a pattern from another project. These actions stay in the draft until Apply. Song import/export, full JSON backup controls, and editing repeat/BPM/length/mutes are still being migrated; use `web` for those workflows.
+Use `Ctrl+O` to open another project in a workspace tab. `Ctrl+Tab` and `Ctrl+Shift+Tab` switch projects; each tab keeps its own pending changes and shows whether it is clean or has a draft. Pattern import can use another open tab as its source, including that tab's staged changes.
+
+Press `F2` to open Pattern Manager. There you can filter with `/`, then copy (`c`), move (`m`), clear (`d`), rename (`r`), or import (`i`) a pattern from another open tab or project path. These actions stay in the draft until Apply. Song import/export, full JSON backup controls, and editing repeat/BPM/length/mutes are still being migrated; use `web` for those workflows.
 
 ### macOS launcher
 

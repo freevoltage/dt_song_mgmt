@@ -89,8 +89,20 @@ class ProjectSession:
                 source_path = Path(operation["src_path"]).expanduser().resolve()
                 if source_path == self.path:
                     raise ValueError("choose a different source project")
-                _manifest, source_payload, _members = read_project(source_path)
-                _source_head, source_raw = unpack_project(source_payload)
+                if "source_image_base64" in operation:
+                    try:
+                        source_raw = base64.b64decode(operation["source_image_base64"], validate=True)
+                    except (KeyError, ValueError, TypeError):
+                        raise ValueError("source project snapshot is missing or invalid") from None
+                    if len(source_raw) != operation.get("source_image_length"):
+                        raise ValueError("source project snapshot length does not match")
+                    if hashlib.sha256(source_raw).hexdigest() != operation.get("source_image_sha256"):
+                        raise ValueError("source project snapshot checksum does not match")
+                    get_song_slots(source_raw)
+                    get_all_patterns_info(source_raw)
+                else:
+                    _manifest, source_payload, _members = read_project(source_path)
+                    _source_head, source_raw = unpack_project(source_payload)
                 if device_name(source_raw, source_path.suffix) != device_name(raw, self.path.suffix):
                     raise ValueError("patterns can only be imported between matching devices")
                 raw = copy_pattern_blocks(source_raw, raw, operation.get("mappings"))
@@ -178,16 +190,28 @@ class ProjectSession:
         }
         self.replace_operations([operation])
 
-    def stage_pattern_import(self, source_path: Path | str, mappings: list[dict]) -> None:
+    def stage_pattern_import(
+        self,
+        source_path: Path | str,
+        mappings: list[dict],
+        source_raw: bytes | None = None,
+    ) -> None:
         source = Path(source_path).expanduser().resolve()
         if source == self.path:
             raise ValueError("choose a different source project")
         pairs = validate_pattern_mapping(mappings)
-        self.stage({
+        operation = {
             "type": "pattern_import",
             "src_path": str(source),
             "mappings": [{"src_idx": src, "dst_idx": dst} for src, dst in pairs],
-        })
+        }
+        if source_raw is not None:
+            operation.update({
+                "source_image_base64": base64.b64encode(source_raw).decode("ascii"),
+                "source_image_length": len(source_raw),
+                "source_image_sha256": hashlib.sha256(source_raw).hexdigest(),
+            })
+        self.stage(operation)
 
     def apply(self) -> Path:
         """Back up and atomically write the current draft to its project file."""

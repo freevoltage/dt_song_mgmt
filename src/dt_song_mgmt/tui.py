@@ -7,7 +7,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Label, Static
+from textual.widgets import Button, DataTable, Footer, Input, Label, Static, Tab, Tabs
 
 from .session import ProjectSession
 from .songs import (
@@ -104,14 +104,19 @@ class UnsavedExitModal(ModalScreen[str | None]):
     """
     BINDINGS = [("escape", "stay", "Stay")]
 
+    def __init__(self, summary: str):
+        super().__init__()
+        self.summary = summary
+
     def compose(self) -> ComposeResult:
         with Vertical(id="exit-dialog"):
-            yield Label("There are unapplied project changes.")
-            yield Static("Apply writes the project after creating a .bak backup.")
+            yield Label("Open projects have unapplied changes.")
+            yield Static(self.summary)
+            yield Static("Apply writes each project after creating its .bak backup.")
             with Horizontal(id="exit-buttons"):
                 yield Button("Stay", id="stay")
-                yield Button("Discard & Quit", id="discard", variant="error")
-                yield Button("Apply & Quit", id="apply", variant="warning")
+                yield Button("Discard All & Quit", id="discard", variant="error")
+                yield Button("Apply All & Quit", id="apply", variant="warning")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id)
@@ -135,6 +140,11 @@ class ProjectBrowser(App[None]):
         padding: 0 2;
         background: #202630;
         border-bottom: tall #3a4655;
+    }
+    #project-tabs {
+        height: 3;
+        background: #171c23;
+        padding: 0 1;
     }
     #project-banner {
         width: 1fr;
@@ -196,6 +206,9 @@ class ProjectBrowser(App[None]):
         ("ctrl+s", "apply_changes", "Apply changes"),
         ("u", "undo_change", "Undo staged edit"),
         ("f2", "open_patterns", "Pattern manager"),
+        ("ctrl+o", "open_project", "Open project"),
+        ("ctrl+tab", "next_project", "Next project"),
+        ("ctrl+shift+tab", "previous_project", "Previous project"),
     ]
 
     def __init__(self, project_path: Path | str) -> None:
@@ -206,6 +219,9 @@ class ProjectBrowser(App[None]):
         self.songs: list[dict] = []
         self.pattern_names: list[str] = []
         self.session: ProjectSession | None = None
+        self.sessions: list[ProjectSession] = []
+        self._tab_sessions: dict[str, ProjectSession] = {}
+        self._active_tab_id = "project-0"
         self.active_song_slot = 0
         self.active_row_index: int | None = None
 
@@ -213,6 +229,7 @@ class ProjectBrowser(App[None]):
         with Horizontal(id="project-header"):
             yield Static("Loading project…", id="project-banner")
             yield Static("", id="device-banner")
+        yield Tabs(Tab(self.project_path.name, id="project-0"), id="project-tabs")
         with Horizontal(id="workspace"):
             with Vertical(id="songs-pane"):
                 yield Static("SONG SLOTS", classes="pane-title")
@@ -226,6 +243,8 @@ class ProjectBrowser(App[None]):
     def on_mount(self) -> None:
         try:
             self.session = ProjectSession(self.project_path)
+            self.sessions = [self.session]
+            self._tab_sessions[self._active_tab_id] = self.session
             state = self.session.state()
             self.project_title = state["project_name"] or self.project_path.name
             self.device = state["device"]
@@ -243,6 +262,70 @@ class ProjectBrowser(App[None]):
         rows_table.add_columns("#", "Pattern", "Label", "Rep", "BPM", "Length", "Muted tracks")
         self._refresh_state()
         songs_table.focus()
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        if event.tab is None:
+            return
+        session = self._tab_sessions.get(event.tab.id or "")
+        if session is not None and session is not self.session:
+            self._activate_project(event.tab.id or "", session)
+
+    def _activate_project(self, tab_id: str, session: ProjectSession) -> None:
+        self._active_tab_id = tab_id
+        self.session = session
+        self.project_path = session.path
+        self.project_title = session.name or session.path.name
+        self.device = session.device
+        self.active_song_slot = 0
+        self.active_row_index = None
+        self._refresh_state()
+
+    def _tab_label(self, session: ProjectSession) -> str:
+        pending = len(session.operations)
+        marker = f"*{pending}" if pending else "clean"
+        return f"{session.path.name} [{session.device} {marker}]"
+
+    def _refresh_tab_labels(self) -> None:
+        tabs = self.query_one("#project-tabs", Tabs)
+        for tab_id, session in self._tab_sessions.items():
+            tab = tabs.get_tab(tab_id)
+            if tab is not None:
+                tab.label = self._tab_label(session)
+
+    def action_open_project(self) -> None:
+        self.push_screen(
+            EntryModal("Open project", "Enter a .dn2prj or .dt2prj file path."),
+            self._on_open_project,
+        )
+
+    def _on_open_project(self, value: str | None) -> None:
+        if value is None or not value.strip():
+            return
+        path = Path(value.strip()).expanduser().resolve()
+        for tab_id, session in self._tab_sessions.items():
+            if session.path == path:
+                tabs = self.query_one("#project-tabs", Tabs)
+                tabs.active = tab_id
+                self._activate_project(tab_id, session)
+                return
+        try:
+            session = ProjectSession(path)
+        except Exception as exc:
+            self.notify(f"Could not open project: {exc}", severity="error", timeout=10)
+            return
+        tab_id = f"project-{len(self._tab_sessions)}"
+        self.sessions.append(session)
+        self._tab_sessions[tab_id] = session
+        tabs = self.query_one("#project-tabs", Tabs)
+        tabs.add_tab(Tab(self._tab_label(session), id=tab_id))
+        tabs.active = tab_id
+        self._activate_project(tab_id, session)
+
+    def action_next_project(self) -> None:
+        self.query_one("#project-tabs", Tabs).action_next_tab()
+
+    def action_previous_project(self) -> None:
+        self.query_one("#project-tabs", Tabs).action_previous_tab()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "songs-table":
@@ -281,6 +364,7 @@ class ProjectBrowser(App[None]):
             f"{self.project_path.name}  ·  {self.project_title}"
         )
         self.query_one("#device-banner", Static).update(f"{self.device}  ·  {marker}")
+        self._refresh_tab_labels()
         songs_table = self.query_one("#songs-table", DataTable)
         songs_table.clear(columns=False)
         for song in self.songs:
@@ -384,7 +468,7 @@ class ProjectBrowser(App[None]):
         if self.session is None:
             return
         from .tui_patterns import PatternManagerScreen
-        self.push_screen(PatternManagerScreen(self.session), self._on_patterns_closed)
+        self.push_screen(PatternManagerScreen(self.session, self.sessions), self._on_patterns_closed)
 
     def _on_patterns_closed(self, _result: None) -> None:
         self._refresh_state()
@@ -402,28 +486,40 @@ class ProjectBrowser(App[None]):
         self.push_screen(ConfirmApplyModal(summary), self._on_apply_confirmation)
 
     def action_quit(self) -> None:
-        if self.session is None or not self.session.operations:
+        dirty = [session for session in self.sessions if session.operations]
+        if not dirty:
             self.exit()
             return
-        self.push_screen(UnsavedExitModal(), self._on_exit_choice)
+        summary = "\n".join(
+            f"{session.path.name}: {len(session.operations)} staged change(s)"
+            for session in dirty
+        )
+        self.push_screen(UnsavedExitModal(summary), self._on_exit_choice)
 
     def _on_exit_choice(self, choice: str | None) -> None:
         if choice == "stay" or choice is None:
             return
-        if self.session is None:
-            self.exit()
-            return
         if choice == "discard":
-            self.session.discard()
+            for session in self.sessions:
+                session.discard()
             self.exit()
             return
         if choice == "apply":
+            backups = []
             try:
-                backup = self.session.apply()
+                for session in self.sessions:
+                    if session.operations:
+                        backups.append(session.apply())
             except Exception as exc:
-                self.notify(f"Could not apply changes: {exc}", severity="error", timeout=10)
+                self._refresh_tab_labels()
+                if self.session is not None:
+                    self._refresh_state()
+                self.notify(f"Could not apply all projects: {exc}", severity="error", timeout=10)
                 return
-            self.notify(f"Applied. Backup: {backup}", timeout=10)
+            self.notify(
+                f"Applied {len(backups)} project(s). Backups: {', '.join(str(path) for path in backups)}",
+                timeout=10,
+            )
             self.exit()
 
     def _on_apply_confirmation(self, confirmed: bool) -> None:
