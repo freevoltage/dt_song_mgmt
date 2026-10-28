@@ -60,19 +60,25 @@ If that port is occupied, DSM reports the conflict and exits. Each running proje
 
 ## Terminal interface
 
-The Textual terminal interface is available alongside the web editor while the remaining workflows are being migrated:
+Open a project in the Textual terminal interface:
 
 ```bash
 dsm "DN2 YEAR 2026 2.dn2prj" tui
 ```
 
-Run that from the directory containing the project file, or pass its full path, for example `dsm "/path/to/DN2 YEAR 2026 2.dn2prj" tui`. The `tui` subcommand opens the project in the terminal; `web` still opens the browser editor.
+Run that from the directory containing the project file. For a project elsewhere, pass its full path:
 
-It shows the project's 16 song slots and the selected song's rows. Use the arrow keys to navigate, `Tab` to switch tables, `p` to change the selected row's pattern, `d` to delete a row, `u` to undo the last staged edit, and `Ctrl+S` to review and apply changes. Applying creates a `.bak` first. If you quit with pending edits, the TUI offers to apply, discard, or stay.
+```bash
+dsm "/path/to/DN2 YEAR 2026 2.dn2prj" tui
+```
+
+The final `tui` selects the terminal interface; use `web` in the same position to open the browser editor.
+
+It shows the project's 16 song slots and the selected song's rows. Use the arrow keys to navigate and `Tab` to switch tables. On a selected row, `p` changes pattern, `d` deletes it, `Alt+Up/Down` reorders it, `c` copies it to another song, and `m` moves it to another song. `r` edits repeat, `b` edits BPM, `l` edits length, and `t` toggles a track mute. Press `n` to rename the song. `s` swaps song slots, `k` clears a song's rows while keeping its name, and `e` empties the slot. `u` undoes and `Ctrl+Y` redoes staged edits. All edits stay in the draft until `Ctrl+S` applies them and creates a `.bak`. If you quit with pending edits, the TUI offers to apply, discard, or stay.
 
 Use `Ctrl+O` to open another project in a workspace tab. `Ctrl+Tab` and `Ctrl+Shift+Tab` switch projects; each tab keeps its own pending changes and shows whether it is clean or has a draft. Pattern import can use another open tab as its source, including that tab's staged changes.
 
-Press `F2` to open Pattern Manager. There you can filter with `/`, then copy (`c`), move (`m`), clear (`d`), rename (`r`), or import (`i`) a pattern from another open tab or project path. These actions stay in the draft until Apply. Song import/export, full JSON backup controls, and editing repeat/BPM/length/mutes are still being migrated; use `web` for those workflows.
+Press `F2` to open Pattern Manager. There you can filter with `/`, then copy (`c`), move (`m`), clear (`d`), rename (`r`), or import (`i`) a pattern from another open tab or project path. Press `x` to export the selected song as a `.bin`, `v` to stage a `.bin` restore, or `g` to import a song slot from another project. `Ctrl+E` exports a full project JSON snapshot; `Ctrl+I` stages a full snapshot or older arrangement-only JSON restore. The latter warns that it contains no patterns and keeps the current project's patterns. Imports stay staged until Apply.
 
 ### macOS launcher
 
