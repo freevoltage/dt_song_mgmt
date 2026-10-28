@@ -4,7 +4,7 @@ Dump and restore song slots from Elektron Transfer Digitakt II (`.dt2prj`) and D
 
 Transfer stores the project as LZ4-compressed 32 KiB blocks, not raw song bytes. This script decompresses the project, copies the 16 uncompressed song slots (3072 bytes each), and recompresses on restore so the device can import the file. Pattern names are read and written using the device-specific layout.
 
-Python 3.10 or newer. No runtime dependencies are required.
+Python 3.10 or newer. The terminal interface uses Textual.
 
 ## Install for development
 
@@ -15,7 +15,7 @@ uv tool uninstall dt-song-mgmt  # only if replacing the earlier package
 uv tool install --editable .
 ```
 
-The `dsm` command then uses this working tree, so source changes are available without reinstalling. Restart a running web server after changing Python code.
+The `dsm` command then uses this working tree, so source changes are available without reinstalling. Re-run `uv tool install --editable .` after changing project dependencies. Restart a running web server after changing Python code.
 
 ## Dump
 
@@ -63,8 +63,10 @@ If that port is occupied, DSM reports the conflict and exits. Each running proje
 The Textual terminal interface is available alongside the web editor while the remaining workflows are being migrated:
 
 ```bash
-dsm project.dn2prj tui
+dsm "DN2 YEAR 2026 2.dn2prj" tui
 ```
+
+Run that from the directory containing the project file, or pass its full path, for example `dsm "/path/to/DN2 YEAR 2026 2.dn2prj" tui`. The `tui` subcommand opens the project in the terminal; `web` still opens the browser editor.
 
 It shows the project's 16 song slots and the selected song's rows. Use the arrow keys to navigate, `Tab` to switch tables, `p` to change the selected row's pattern, `d` to delete a row, `u` to undo the last staged edit, and `Ctrl+S` to review and apply changes. Applying creates a `.bak` first. If you quit with pending edits, the TUI offers to apply, discard, or stay.
 
