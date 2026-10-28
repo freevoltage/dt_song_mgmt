@@ -7,7 +7,7 @@ name = "elektron-digi-song-mode-manager"
 version = "0.1.0"
 description = "Manage Digitakt II and Digitone II song mode projects"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["textual>=1.0"]
 
 [project.scripts]
 dsm = "dt_song_mgmt.cli:main"

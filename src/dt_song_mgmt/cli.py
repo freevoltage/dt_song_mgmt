@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> None:
         argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
         print("Elektron Digi Song Mode Manager (dsm)", file=sys.stderr)
-        print("Usage: dsm <project> [info|rows|restore|web] ... | dsm launch | dsm stop", file=sys.stderr)
+        print("Usage: dsm <project> [tui|info|rows|restore|web] ... | dsm launch | dsm stop", file=sys.stderr)
         raise SystemExit(0 if argv and argv[0] in ("-h", "--help") else 2)
 
     if argv[0] == "launch":
@@ -83,6 +83,10 @@ def main(argv: list[str] | None = None) -> None:
                 continue
             i += 1
         run_web_server(prj, port, auto_port=not port_explicit)
+        return
+    elif cmd == "tui":
+        from .tui import run_tui
+        run_tui(prj)
         return
     else:
         raise SystemExit("unknown command")

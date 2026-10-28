@@ -58,6 +58,16 @@ dsm project.dn2prj web --port 8090
 
 If that port is occupied, DSM reports the conflict and exits. Each running project has its own browser address and can be opened beside another project.
 
+## Terminal interface
+
+The Textual terminal interface is available alongside the web editor while it is being built out:
+
+```bash
+dsm project.dn2prj tui
+```
+
+It currently shows the project's 16 song slots and the selected song's rows. Use the arrow keys to select a song, `Tab` to switch between tables, and `q` to quit. Editing and apply/backup controls are being migrated next; for now, use `web` for changes.
+
 ### macOS launcher
 
 Open `macos/DSM Launcher.app` from Finder to choose a project and open it in the browser without leaving a Terminal window running. Open the launcher again to start another project in its own browser window. Choose **Stop app-launched servers** from the launcher menu when you are finished.
