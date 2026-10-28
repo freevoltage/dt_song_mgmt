@@ -66,7 +66,9 @@ The Textual terminal interface is available alongside the web editor while the r
 dsm project.dn2prj tui
 ```
 
-It shows the project's 16 song slots and the selected song's rows. Use the arrow keys to navigate, `Tab` to switch tables, `p` to change the selected row's pattern, `d` to delete a row, `u` to undo the last staged edit, and `Ctrl+S` to review and apply changes. Applying creates a `.bak` first. If you quit with pending edits, the TUI offers to apply, discard, or stay. Song editing, pattern management, and cross-project import are still being migrated; use `web` for those workflows.
+It shows the project's 16 song slots and the selected song's rows. Use the arrow keys to navigate, `Tab` to switch tables, `p` to change the selected row's pattern, `d` to delete a row, `u` to undo the last staged edit, and `Ctrl+S` to review and apply changes. Applying creates a `.bak` first. If you quit with pending edits, the TUI offers to apply, discard, or stay.
+
+Press `F2` to open Pattern Manager. There you can filter with `/`, then copy (`c`), move (`m`), clear (`d`), rename (`r`), or import (`i`) a pattern from another project. These actions stay in the draft until Apply. Song import/export, full JSON backup controls, and editing repeat/BPM/length/mutes are still being migrated; use `web` for those workflows.
 
 ### macOS launcher
 

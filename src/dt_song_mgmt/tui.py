@@ -28,6 +28,7 @@ class EntryModal(ModalScreen[str | None]):
     #entry-buttons { height: 3; align-horizontal: right; }
     #entry-buttons Button { margin-left: 1; }
     """
+    BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, title: str, prompt: str, placeholder: str = "", initial: str = ""):
         super().__init__()
@@ -48,6 +49,9 @@ class EntryModal(ModalScreen[str | None]):
     def on_mount(self) -> None:
         self.query_one("#entry-input", Input).focus()
 
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value)
 
@@ -67,6 +71,7 @@ class ConfirmApplyModal(ModalScreen[bool]):
     #confirm-buttons { height: 3; align-horizontal: right; }
     #confirm-buttons Button { margin-left: 1; }
     """
+    BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, summary: str):
         super().__init__()
@@ -84,6 +89,9 @@ class ConfirmApplyModal(ModalScreen[bool]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "apply")
 
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
 
 class UnsavedExitModal(ModalScreen[str | None]):
     """Offer explicit choices before closing a session with staged edits."""
@@ -94,6 +102,7 @@ class UnsavedExitModal(ModalScreen[str | None]):
     #exit-buttons { height: 3; align-horizontal: right; }
     #exit-buttons Button { margin-left: 1; }
     """
+    BINDINGS = [("escape", "stay", "Stay")]
 
     def compose(self) -> ComposeResult:
         with Vertical(id="exit-dialog"):
@@ -107,6 +116,9 @@ class UnsavedExitModal(ModalScreen[str | None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id)
 
+    def action_stay(self) -> None:
+        self.dismiss("stay")
+
 
 class ProjectBrowser(App[None]):
     """Browse a project's song slots and song rows in the terminal."""
@@ -116,30 +128,41 @@ class ProjectBrowser(App[None]):
     CSS = """
     Screen {
         layout: vertical;
-        background: #101216;
+        background: #101318;
+    }
+    #project-header {
+        height: 3;
+        padding: 0 2;
+        background: #202630;
+        border-bottom: tall #3a4655;
     }
     #project-banner {
-        height: 3;
-        padding: 0 1;
-        background: #1c222b;
-        color: #f3f4f6;
+        width: 1fr;
         content-align: left middle;
+        color: #f3f4f6;
+        text-style: bold;
+    }
+    #device-banner {
+        width: auto;
+        min-width: 26;
+        content-align: right middle;
+        color: #8fd3c7;
         text-style: bold;
     }
     #workspace {
         height: 1fr;
-        padding: 1;
+        padding: 1 1 0 1;
         layout: horizontal;
     }
     #songs-pane {
-        width: 34;
-        min-width: 27;
+        width: 30;
+        min-width: 24;
         border: round #3b4654;
         padding: 0 1;
     }
     #rows-pane {
         width: 1fr;
-        min-width: 48;
+        min-width: 32;
         border: round #3b4654;
         padding: 0 1;
     }
@@ -151,12 +174,17 @@ class ProjectBrowser(App[None]):
     }
     DataTable {
         height: 1fr;
-        background: #101216;
+        background: #101318;
+        border: tall #3b4654;
+    }
+    DataTable:focus {
+        border: tall #8fd3c7;
     }
     #message {
         height: 1;
-        color: #9ca3af;
-        padding: 0 1;
+        color: #b3bdc9;
+        padding: 0 2;
+        background: #202630;
     }
     """
     BINDINGS = [
@@ -167,6 +195,7 @@ class ProjectBrowser(App[None]):
         ("d", "delete_row", "Delete row"),
         ("ctrl+s", "apply_changes", "Apply changes"),
         ("u", "undo_change", "Undo staged edit"),
+        ("f2", "open_patterns", "Pattern manager"),
     ]
 
     def __init__(self, project_path: Path | str) -> None:
@@ -181,7 +210,9 @@ class ProjectBrowser(App[None]):
         self.active_row_index: int | None = None
 
     def compose(self) -> ComposeResult:
-        yield Static("Loading project…", id="project-banner")
+        with Horizontal(id="project-header"):
+            yield Static("Loading project…", id="project-banner")
+            yield Static("", id="device-banner")
         with Horizontal(id="workspace"):
             with Vertical(id="songs-pane"):
                 yield Static("SONG SLOTS", classes="pane-title")
@@ -189,7 +220,7 @@ class ProjectBrowser(App[None]):
             with Vertical(id="rows-pane"):
                 yield Static("SONG ROWS", classes="pane-title")
                 yield DataTable(id="rows-table", cursor_type="row", zebra_stripes=True)
-        yield Static("↑/↓ select · Tab switch pane · q quit", id="message")
+        yield Static("Draft stays in memory until Apply · a .bak is created before writing", id="message")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -245,10 +276,11 @@ class ProjectBrowser(App[None]):
         if self.songs:
             self.active_song_slot = min(self.active_song_slot, len(self.songs) - 1)
         pending = state["pending_changes"]
-        marker = f"PENDING {pending}" if pending else "CLEAN"
+        marker = f"DRAFT {pending}" if pending else "CLEAN"
         self.query_one("#project-banner", Static).update(
-            f"{self.project_path.name}  ·  {self.project_title}  ·  {self.device}  ·  {marker}"
+            f"{self.project_path.name}  ·  {self.project_title}"
         )
+        self.query_one("#device-banner", Static).update(f"{self.device}  ·  {marker}")
         songs_table = self.query_one("#songs-table", DataTable)
         songs_table.clear(columns=False)
         for song in self.songs:
@@ -347,6 +379,15 @@ class ProjectBrowser(App[None]):
         self.session.operations.pop()
         self._refresh_state()
         self.notify("Last staged operation undone")
+
+    def action_open_patterns(self) -> None:
+        if self.session is None:
+            return
+        from .tui_patterns import PatternManagerScreen
+        self.push_screen(PatternManagerScreen(self.session), self._on_patterns_closed)
+
+    def _on_patterns_closed(self, _result: None) -> None:
+        self._refresh_state()
 
     def action_apply_changes(self) -> None:
         if self.session is None or not self.session.operations:
