@@ -35,12 +35,10 @@ class ProjectSession:
         self.operations: list[dict] = []
         self._load()
 
-    def _file_fingerprint(self) -> str:
-        digest = hashlib.sha256()
-        with self.path.open("rb") as source:
-            for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+    def _file_fingerprint(self) -> tuple[int, int, int, int]:
+        """Return a cheap signature for detecting edits from another session."""
+        stat = self.path.stat()
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
 
     def _load(self) -> None:
         self.manifest, self.payload, self.members = read_project(self.path)

@@ -60,13 +60,13 @@ If that port is occupied, DSM reports the conflict and exits. Each running proje
 
 ## Terminal interface
 
-The Textual terminal interface is available alongside the web editor while it is being built out:
+The Textual terminal interface is available alongside the web editor while the remaining workflows are being migrated:
 
 ```bash
 dsm project.dn2prj tui
 ```
 
-It currently shows the project's 16 song slots and the selected song's rows. Use the arrow keys to select a song, `Tab` to switch between tables, and `q` to quit. Editing and apply/backup controls are being migrated next; for now, use `web` for changes.
+It shows the project's 16 song slots and the selected song's rows. Use the arrow keys to navigate, `Tab` to switch tables, `p` to change the selected row's pattern, `d` to delete a row, `u` to undo the last staged edit, and `Ctrl+S` to review and apply changes. Applying creates a `.bak` first. If you quit with pending edits, the TUI offers to apply, discard, or stay. Song editing, pattern management, and cross-project import are still being migrated; use `web` for those workflows.
 
 ### macOS launcher
 
