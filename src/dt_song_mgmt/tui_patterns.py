@@ -71,6 +71,15 @@ class PatternManagerScreen(ModalScreen[None]):
     BINDINGS = [
         ("escape", "close", "Back"),
         ("/", "focus_filter", "Search"),
+        ("1", "filter_bank_a", "Bank A"),
+        ("2", "filter_bank_b", "Bank B"),
+        ("3", "filter_bank_c", "Bank C"),
+        ("4", "filter_bank_d", "Bank D"),
+        ("5", "filter_bank_e", "Bank E"),
+        ("6", "filter_bank_f", "Bank F"),
+        ("7", "filter_bank_g", "Bank G"),
+        ("8", "filter_bank_h", "Bank H"),
+        ("0", "filter_all_banks", "All banks"),
         ("c", "copy_pattern", "Copy"),
         ("m", "move_pattern", "Move"),
         ("d", "clear_pattern", "Clear"),
@@ -78,12 +87,13 @@ class PatternManagerScreen(ModalScreen[None]):
         ("i", "import_pattern", "Import"),
     ]
 
-    def __init__(self, session, sessions=None):
+    def __init__(self, session, sessions=None, bank_filter: int | None = None):
         super().__init__()
         self.session = session
         self.sessions = list(sessions or [session])
         self.selected_pattern = 0
         self.filter_text = ""
+        self.bank_filter = bank_filter
 
     def compose(self) -> ComposeResult:
         with Vertical(id="pattern-window"):
@@ -113,6 +123,8 @@ class PatternManagerScreen(ModalScreen[None]):
 
     def _visible_patterns(self) -> list[dict]:
         patterns = get_all_patterns_info(self.session.working_raw())
+        if self.bank_filter is not None:
+            patterns = [pattern for pattern in patterns if pattern["index"] // 16 == self.bank_filter]
         if not self.filter_text:
             return patterns
         return [
@@ -124,6 +136,10 @@ class PatternManagerScreen(ModalScreen[None]):
     def _refresh_table(self) -> None:
         table = self.query_one("#pattern-table", DataTable)
         patterns = self._visible_patterns()
+        bank_label = "ALL BANKS" if self.bank_filter is None else f"BANK {chr(ord('A') + self.bank_filter)}"
+        self.query_one("#pattern-heading", Static).update(
+            f"PATTERN MANAGER · {bank_label} · 1–8 SELECT BANK · 0 ALL"
+        )
         table.clear(columns=False)
         for pattern in patterns:
             name = pattern["name"].strip() or "(unnamed)"
@@ -141,6 +157,37 @@ class PatternManagerScreen(ModalScreen[None]):
 
     def action_focus_filter(self) -> None:
         self.query_one("#pattern-search", Input).focus()
+
+    def _select_bank(self, bank: int | None) -> None:
+        self.bank_filter = bank
+        self._refresh_table()
+
+    def action_filter_bank_a(self) -> None:
+        self._select_bank(0)
+
+    def action_filter_bank_b(self) -> None:
+        self._select_bank(1)
+
+    def action_filter_bank_c(self) -> None:
+        self._select_bank(2)
+
+    def action_filter_bank_d(self) -> None:
+        self._select_bank(3)
+
+    def action_filter_bank_e(self) -> None:
+        self._select_bank(4)
+
+    def action_filter_bank_f(self) -> None:
+        self._select_bank(5)
+
+    def action_filter_bank_g(self) -> None:
+        self._select_bank(6)
+
+    def action_filter_bank_h(self) -> None:
+        self._select_bank(7)
+
+    def action_filter_all_banks(self) -> None:
+        self._select_bank(None)
 
     def _stage(self, operation: dict, message: str) -> None:
         try:
@@ -183,7 +230,7 @@ class PatternManagerScreen(ModalScreen[None]):
         source = self.selected_pattern
         self._stage(
             {"type": "pattern_copy", "src_idx": source, "dst_idx": destination},
-            f"Copied {pattern_label(source)} to {pattern_label(destination)} in the draft",
+            f"Copied {pattern_label(source)} to {pattern_label(destination)} in the draft; press s to save",
         )
         self.selected_pattern = destination
         self._refresh_table()
@@ -202,7 +249,7 @@ class PatternManagerScreen(ModalScreen[None]):
         source = self.selected_pattern
         self._stage(
             {"type": "pattern_move", "src_idx": source, "dst_idx": destination},
-            f"Moved {pattern_label(source)} to {pattern_label(destination)} in the draft",
+            f"Moved {pattern_label(source)} to {pattern_label(destination)} in the draft; press s to save",
         )
         self.selected_pattern = destination
         self._refresh_table()
@@ -217,7 +264,7 @@ class PatternManagerScreen(ModalScreen[None]):
         slot = self.selected_pattern
         self._stage(
             {"type": "pattern_clear", "pat_idx": slot},
-            f"Cleared {pattern_label(slot)} in the draft",
+            f"Cleared {pattern_label(slot)} in the draft; press s to save",
         )
 
     def action_rename_pattern(self) -> None:
@@ -241,7 +288,7 @@ class PatternManagerScreen(ModalScreen[None]):
             return
         self._stage(
             {"type": "pattern_rename", "pat_idx": self.selected_pattern, "name": name},
-            f"Renamed {pattern_label(self.selected_pattern)} in the draft",
+            f"Renamed {pattern_label(self.selected_pattern)} in the draft; press s to save",
         )
 
     def action_import_pattern(self) -> None:
@@ -297,7 +344,7 @@ class PatternManagerScreen(ModalScreen[None]):
             )
             self._refresh_table()
             self.app.notify(
-                f"Imported {pattern_label(source_slot)} to {pattern_label(destination)} in the draft"
+                f"Imported {pattern_label(source_slot)} to {pattern_label(destination)} in the draft; press s to save"
             )
         except Exception as exc:
             self.app.notify(str(exc), severity="error", timeout=10)
