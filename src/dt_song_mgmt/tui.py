@@ -98,6 +98,56 @@ class ConfirmModal(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class SaveValidationModal(ModalScreen[bool]):
+    """Show pre-save checks before a project is written."""
+
+    CSS = """
+    SaveValidationModal { align: center middle; background: $background 60%; }
+    #save-validation-dialog { width: 96; height: auto; max-height: 90%; padding: 1 2; border: round $primary; background: $surface; }
+    #save-validation-results { height: auto; max-height: 1fr; margin: 1 0; }
+    #save-validation-buttons { height: 3; align-horizontal: right; }
+    #save-validation-buttons Button { margin-left: 1; }
+    """
+    BINDINGS = [("escape", "cancel", "Back")]
+
+    def __init__(self, destination: Path, checks: list[dict]):
+        super().__init__()
+        self.destination = destination
+        self.checks = checks
+        self.can_continue = not any(check["status"] == "fail" for check in checks)
+
+    def compose(self) -> ComposeResult:
+        passed = sum(check["status"] == "pass" for check in self.checks)
+        failures = sum(check["status"] == "fail" for check in self.checks)
+        warnings = sum(check["status"] == "warning" for check in self.checks)
+        verdict = "READY TO SAVE" if self.can_continue else "SAVE BLOCKED"
+        yield Vertical(
+            Label(f"Pre-save validation · {verdict}"),
+            Static(str(self.destination)),
+            Static(f"{passed} passed · {warnings} warnings · {failures} failed"),
+            Static(
+                "\n".join(
+                    f"{'✓' if item['status'] == 'pass' else '⚠' if item['status'] == 'warning' else '✗'} "
+                    f"{item['label']}: {item['detail']}"
+                    for item in self.checks
+                ),
+                id="save-validation-results",
+            ),
+            Horizontal(
+                Button("Back", id="cancel"),
+                *([Button("Continue", id="continue", variant="primary")] if self.can_continue else []),
+                id="save-validation-buttons",
+            ),
+            id="save-validation-dialog",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "continue")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 class UnsavedExitModal(ModalScreen[str | None]):
     """Offer explicit choices before closing a session with staged edits."""
 
@@ -1159,6 +1209,15 @@ class ProjectBrowser(App[None]):
         if target == self.session.path:
             self.notify("Save As needs a new path; the source project is kept unchanged", severity="error")
             return
+        if self.session is None:
+            return
+        checks = self.session.validate_save_as(target)
+        self.push_screen(
+            SaveValidationModal(target, checks),
+            lambda proceed: self._confirm_save_target(target) if proceed else None,
+        )
+
+    def _confirm_save_target(self, target: Path) -> None:
         if target.exists():
             self.push_screen(
                 ConfirmModal(

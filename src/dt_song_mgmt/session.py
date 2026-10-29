@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .constants import (
+    DT2_IMAGE_SIZE,
+    DN2_IMAGE_SIZE,
     KIT_BASE,
     PATTERN_BASE,
+    PATTERN_SLOTS,
     PATTERN_STRIDE,
+    PROJECT_NAME_LEN,
     SONG_SIZE,
     SONG_SLOTS,
     device_name,
@@ -199,6 +204,135 @@ class ProjectSession:
             "patterns": get_all_patterns_info(raw),
             "pending_changes": len(self.operations),
         }
+
+    def validate_save_as(self, destination: Path | str) -> list[dict]:
+        """Check a staged draft and its proposed Save As destination."""
+        target = Path(destination).expanduser().resolve()
+        checks: list[dict] = []
+
+        def add(label: str, status: str, detail: str) -> None:
+            checks.append({"label": label, "status": status, "detail": detail})
+
+        extension_ok = target.suffix.lower() == self.path.suffix.lower()
+        add(
+            "Project extension",
+            "pass" if extension_ok else "fail",
+            f"{target.suffix or '(none)'} matches {self.path.suffix}" if extension_ok else f"Keep the {self.path.suffix} extension for this device.",
+        )
+        same_path = target == self.path
+        add(
+            "Save destination",
+            "fail" if same_path or not target.parent.is_dir() else "pass",
+            "Choose a new path; the source project remains unchanged." if same_path else (
+                f"Destination folder does not exist: {target.parent}" if not target.parent.is_dir() else str(target)
+            ),
+        )
+        try:
+            unchanged = self._file_fingerprint() == self._fingerprint
+        except OSError:
+            unchanged = False
+        add(
+            "Source project",
+            "pass" if unchanged else "fail",
+            "Source file is unchanged on disk." if unchanged else "Source file changed during this session; reload it before saving.",
+        )
+
+        if not extension_ok or same_path or not target.parent.is_dir() or not unchanged:
+            return checks
+
+        try:
+            raw = self.working_raw()
+            actual_device = device_name(raw, target.suffix)
+            device_ok = actual_device == self.device
+            add(
+                "Device type",
+                "pass" if device_ok else "fail",
+                f"Draft and {target.suffix} both identify as {self.device}." if device_ok else f"Draft identifies as {self.device}; destination identifies as {actual_device}.",
+            )
+            expected_size = DT2_IMAGE_SIZE if self.device == "DT2" else DN2_IMAGE_SIZE
+            size_ok = len(raw) == expected_size
+            add(
+                "Project image size",
+                "pass" if size_ok else "fail",
+                f"{len(raw):,} bytes, expected {expected_size:,}." if size_ok else f"Got {len(raw):,} bytes; expected {expected_size:,} for {self.device}.",
+            )
+            songs = get_all_songs_info(raw)
+            song_count_ok = len(songs) == SONG_SLOTS
+            bad_rows = [
+                (song["slot"], row_index, row["pattern"])
+                for song in songs for row_index, row in enumerate(song["rows"])
+                if not 0 <= row["pattern"] < PATTERN_SLOTS
+            ]
+            songs_ok = song_count_ok and not bad_rows
+            song_detail = f"{len(songs)} song slots parsed; all row pattern references are in range."
+            if not song_count_ok:
+                song_detail = f"Expected {SONG_SLOTS} parseable song slots; found {len(songs)}."
+            elif bad_rows:
+                slot, row_index, pattern = bad_rows[0]
+                song_detail = f"Song {slot:02d}, row {row_index + 1} references invalid pattern {pattern}."
+            add("Song data", "pass" if songs_ok else "fail", song_detail)
+
+            patterns = get_all_patterns_info(raw)
+            pattern_end = PATTERN_BASE + PATTERN_SLOTS * PATTERN_STRIDE
+            patterns_ok = len(patterns) == PATTERN_SLOTS and pattern_end <= len(raw)
+            add(
+                "Pattern data",
+                "pass" if patterns_ok else "fail",
+                f"{len(patterns)} pattern slots are readable." if patterns_ok else "Pattern blocks extend beyond the project image.",
+            )
+
+            renamed_raw, project_name, _old_name = patch_project_name(raw, target.stem)
+            packed = pack_project(self.head, renamed_raw)
+            _head, decoded = unpack_project(packed)
+            roundtrip_ok = decoded == renamed_raw
+            add(
+                "Payload integrity",
+                "pass" if roundtrip_ok else "fail",
+                "Packed payload decompresses to the exact draft image." if roundtrip_ok else "Packed payload did not round-trip to the draft image.",
+            )
+            if len(target.stem) > PROJECT_NAME_LEN:
+                add("Device project name", "warning", f"The device name will be limited to {PROJECT_NAME_LEN} characters ({project_name}).")
+            else:
+                add("Device project name", "pass", f"{project_name} fits the device name limit.")
+        except Exception as exc:
+            add("Draft structure", "fail", f"Could not validate draft: {exc}")
+            return checks
+
+        try:
+            member_names = [info.filename for info, _data in self.members]
+            manifest_entries = [(info, data) for info, data in self.members if info.filename == "manifest.json"]
+            payload_entries = [(info, data) for info, data in self.members if info.filename == self.name]
+            missing_samples = [
+                str(sample.get("FileName", ""))
+                for sample in self.manifest.get("Samples", [])
+                if sample.get("FileName") not in member_names
+            ]
+            unique_names = len(member_names) == len(set(member_names))
+            payload_name_collision = project_name in member_names and project_name != self.name
+            archive_ok = (
+                len(manifest_entries) == 1 and len(payload_entries) == 1
+                and not missing_samples and unique_names and not payload_name_collision
+            )
+            if archive_ok:
+                original_manifest = json.loads(manifest_entries[0][1])
+                archive_ok = original_manifest.get("Payload") == self.name
+            if archive_ok:
+                add(
+                    "Project archive assets",
+                    "pass",
+                    f"Manifest and payload are present; all {len(self.manifest.get('Samples', []))} sample files will be preserved.",
+                )
+            else:
+                detail = "Archive has duplicate member names or is missing its manifest/payload."
+                if missing_samples:
+                    detail = f"Manifest sample asset is missing: {missing_samples[0]}"
+                elif payload_name_collision:
+                    detail = f"Renamed payload would collide with existing archive member: {project_name}"
+                add("Project archive assets", "fail", detail)
+        except Exception as exc:
+            add("Project archive assets", "fail", f"Could not validate archive members: {exc}")
+
+        return checks
 
     def preview(self) -> dict:
         new_raw = self.working_raw()
