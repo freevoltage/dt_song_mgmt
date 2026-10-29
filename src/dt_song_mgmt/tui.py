@@ -281,6 +281,7 @@ class ProjectBrowser(App[None]):
         ("ctrl+y", "redo_change", "Redo staged edit"),
         ("f2", "open_patterns", "Pattern manager"),
         ("f3", "open_sample_memory", "Sample memory"),
+        ("f4", "open_song_pattern_overview", "Song pattern overview"),
         ("ctrl+o", "open_project", "Open project"),
         ("ctrl+tab", "next_project", "Next project"),
         ("ctrl+shift+tab", "previous_project", "Previous project"),
@@ -322,7 +323,7 @@ class ProjectBrowser(App[None]):
             with Vertical(id="rows-pane"):
                 yield Static("SONG ROWS", classes="pane-title")
                 yield DataTable(id="rows-table", cursor_type="row", zebra_stripes=True)
-        yield Static("Space select rows · Alt+↑/↓ reorder · c copy · m move · s save project · F2 patterns", id="message")
+        yield Static("Space select rows · Alt+↑/↓ reorder · c copy · m move · s save · F2 patterns · F4 song patterns", id="message")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1143,6 +1144,12 @@ class ProjectBrowser(App[None]):
             self.push_screen(SampleMemoryScreen(self.session))
         except Exception as exc:
             self.notify(f"Could not analyze project samples: {exc}", severity="error", timeout=8)
+
+    def action_open_song_pattern_overview(self) -> None:
+        if self.session is None:
+            return
+        from .tui_song_patterns import SongPatternOverviewScreen
+        self.push_screen(SongPatternOverviewScreen(self.session))
 
     def _open_patterns(self, bank_filter: int | None) -> None:
         if self.session is None:
