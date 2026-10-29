@@ -230,6 +230,7 @@ class ProjectBrowser(App[None]):
         ("u", "undo_change", "Undo staged edit"),
         ("ctrl+y", "redo_change", "Redo staged edit"),
         ("f2", "open_patterns", "Pattern manager"),
+        ("f3", "open_sample_memory", "Sample memory"),
         ("ctrl+o", "open_project", "Open project"),
         ("ctrl+tab", "next_project", "Next project"),
         ("ctrl+shift+tab", "previous_project", "Previous project"),
@@ -1080,6 +1081,18 @@ class ProjectBrowser(App[None]):
 
     def action_open_patterns(self) -> None:
         self._open_patterns(None)
+
+    def action_open_sample_memory(self) -> None:
+        if self.session is None:
+            return
+        if self.session.device != "DT2":
+            self.notify("Sample memory analysis is available for Digitakt II projects", severity="warning")
+            return
+        from .tui_memory import SampleMemoryScreen
+        try:
+            self.push_screen(SampleMemoryScreen(self.session))
+        except Exception as exc:
+            self.notify(f"Could not analyze project samples: {exc}", severity="error", timeout=8)
 
     def _open_patterns(self, bank_filter: int | None) -> None:
         if self.session is None:
