@@ -48,7 +48,7 @@ class SampleMemoryScreen(ModalScreen[None]):
                 f"Shared samples: {self.analysis['shared_sample_count']} · "
                 f"Unreferenced project samples: {self.analysis['unreferenced_sample_count']} "
                 f"({format_bytes(self.analysis['unreferenced_sample_bytes'])}). "
-                "Reference sizes do not guarantee freed RAM when a pattern is removed.",
+                "Includes kit samples and sample locks. Pool-only assets may not be in this archive; sizes do not guarantee freed RAM.",
                 id="memory-note",
             )
             with Vertical(id="memory-columns"):
@@ -95,10 +95,10 @@ class SampleMemoryScreen(ModalScreen[None]):
                 track_text,
                 str(sample["pattern_count"]),
                 format_bytes(sample["size"]),
-                "shared" if sample["shared"] else "unique",
+                ("shared" if sample["shared"] else "unique") + (" · locked" if sample.get("sample_locked") else ""),
             )
         if not entry["samples"]:
-            table.add_row("No manifest samples referenced by this pattern", "", "", "", "")
+            table.add_row("No samples referenced by this pattern", "", "", "", "")
 
     def action_close(self) -> None:
         self.dismiss(None)
