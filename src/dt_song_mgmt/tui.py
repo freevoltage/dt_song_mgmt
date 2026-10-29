@@ -421,6 +421,9 @@ class ProjectBrowser(App[None]):
             slot = int(event.row_key.value)
         except (TypeError, ValueError):
             return
+        self.active_song_slot = slot
+        self.active_row_index = None
+        self.selected_row_indices.clear()
         self._show_song(slot)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -462,6 +465,7 @@ class ProjectBrowser(App[None]):
                 key=str(song["slot"]),
             )
         if self.songs:
+            songs_table.move_cursor(row=self.active_song_slot, column=0)
             self._show_song(self.active_song_slot)
 
     def _show_song(self, slot: int) -> None:
