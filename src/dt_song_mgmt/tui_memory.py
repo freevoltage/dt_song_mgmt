@@ -31,7 +31,7 @@ class SampleMemoryScreen(ModalScreen[None]):
         super().__init__()
         self.session = session
         self.selected_pattern = 0
-        self.analysis = analyze_sample_memory(session.working_raw(), session.manifest)
+        self.analysis = analyze_sample_memory(session.working_raw(), session.working_manifest())
 
     def compose(self) -> ComposeResult:
         total = self.analysis["project_sample_bytes"]

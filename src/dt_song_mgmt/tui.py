@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -18,6 +19,7 @@ from .songs import (
     format_length,
     collect_pattern_names,
     get_song_slots,
+    get_song_rows,
     pattern_label,
 )
 
@@ -306,6 +308,7 @@ class ProjectBrowser(App[None]):
         self.session: ProjectSession | None = None
         self.sessions: list[ProjectSession] = []
         self._tab_sessions: dict[str, ProjectSession] = {}
+        self.clipboard: dict | None = None
         self._active_tab_id = "project-0"
         self.active_song_slot = 0
         self.active_row_index: int | None = None
@@ -323,8 +326,138 @@ class ProjectBrowser(App[None]):
             with Vertical(id="rows-pane"):
                 yield Static("SONG ROWS", classes="pane-title")
                 yield DataTable(id="rows-table", cursor_type="row", zebra_stripes=True)
-        yield Static("Space select rows · Alt+↑/↓ reorder · c copy · m move · s save · F2 patterns · F4 song patterns", id="message")
+        yield Static("Space select rows · Alt+↑/↓ reorder · c copy · m move · Y/X/P song bundle on slots · s save · F2 patterns · F4 song patterns", id="message")
         yield Footer()
+
+    def on_key(self, event) -> None:
+        """Use Y/X/P for song bundles only while the song-slot table is focused."""
+        if event.key != "y" or self.session is None:
+            return
+        try:
+            songs_table = self.query_one("#songs-table", DataTable)
+        except Exception:
+            return
+        if self.focused is not songs_table:
+            return
+        event.stop()
+        self._set_song_clipboard("copy")
+
+    def _set_song_clipboard(self, mode: str) -> None:
+        self.clipboard = {
+            "kind": "song",
+            "mode": mode,
+            "session": self.session,
+            "slot": self.active_song_slot,
+        }
+        action = "Copied" if mode == "copy" else "Cut"
+        self.notify(
+            f"{action} song slot {self.active_song_slot:02d} with its referenced patterns; "
+            "focus a destination song slot and press p"
+        )
+
+    @staticmethod
+    def _parse_pattern_mapping(value: str, source_patterns: set[int]) -> list[dict]:
+        def parse_slot(token: str) -> int:
+            match = re.fullmatch(r"\s*([A-Ha-h])\s*(\d{1,2})\s*", token)
+            if not match:
+                raise ValueError(f"invalid pattern slot: {token.strip()}")
+            number = int(match.group(2))
+            if not 1 <= number <= 16:
+                raise ValueError(f"pattern number must be between 1 and 16: {token.strip()}")
+            return (ord(match.group(1).upper()) - ord("A")) * 16 + number - 1
+
+        result = []
+        for part in value.split(","):
+            if not part.strip():
+                continue
+            pieces = part.split("=", 1)
+            if len(pieces) != 2:
+                raise ValueError("use source=destination pairs, separated by commas")
+            result.append({"src_idx": parse_slot(pieces[0]), "dst_idx": parse_slot(pieces[1])})
+        sources = [item["src_idx"] for item in result]
+        if len(sources) != len(set(sources)) or set(sources) != source_patterns:
+            raise ValueError("map every source pattern exactly once")
+        destinations = [item["dst_idx"] for item in result]
+        if len(destinations) != len(set(destinations)):
+            raise ValueError("each pattern needs a unique destination slot")
+        return result
+
+    def _paste_song_clipboard(self) -> None:
+        clipboard = self.clipboard
+        if not clipboard or clipboard.get("kind") != "song":
+            self.notify("Song clipboard is empty", severity="warning")
+            return
+        source_session = clipboard["session"]
+        source_slot = int(clipboard["slot"])
+        destination_slot = self.active_song_slot
+        if clipboard["mode"] == "cut" and source_session is self.session and source_slot == destination_slot:
+            self.notify("Choose a different destination song slot", severity="warning")
+            return
+        source_raw = source_session.working_raw()
+        source_patterns = {row[0] for row in get_song_rows(get_song_slots(source_raw)[source_slot])}
+        if not source_patterns:
+            self.notify("This song has no rows or referenced patterns to paste", severity="warning")
+            return
+        defaults = ", ".join(f"{pattern_label(index)}={pattern_label(index)}" for index in sorted(source_patterns))
+        self.push_screen(
+            EntryModal(
+                "Map song patterns",
+                "Choose a destination slot for each source pattern. Mapped destination patterns will be replaced.",
+                "A01=A01, B04=C02",
+                defaults,
+            ),
+            lambda value: self._on_song_bundle_mapping(
+                value, clipboard, source_raw, source_patterns, destination_slot
+            ),
+        )
+
+    def _on_song_bundle_mapping(
+        self,
+        value: str | None,
+        clipboard: dict,
+        source_raw: bytes,
+        source_patterns: set[int],
+        destination_slot: int,
+    ) -> None:
+        if value is None:
+            return
+        source_session = clipboard["session"]
+        source_slot = int(clipboard["slot"])
+        destination_staged = False
+        try:
+            mappings = self._parse_pattern_mapping(value, source_patterns)
+            source_members = source_session.working_members()
+            source_manifest = json.loads(
+                next(data for info, data in source_members if info.filename == "manifest.json")
+            )
+            self.session.stage_song_bundle_import(
+                source_session.path,
+                source_slot,
+                destination_slot,
+                mappings,
+                source_raw=source_raw,
+                source_manifest=source_manifest,
+                source_members=source_members,
+            )
+            destination_staged = True
+            if clipboard["mode"] == "cut":
+                source_session.stage_song_bundle_cut(source_slot)
+        except Exception as exc:
+            if destination_staged:
+                self.session.undo()
+            self.notify(f"Could not paste song bundle: {exc}", severity="error", timeout=10)
+            return
+        if clipboard["mode"] == "cut":
+            self.clipboard = None
+            self.notify(
+                f"Moved song {source_slot:02d} to slot {destination_slot:02d}; both project drafts are staged. Press s to save each project."
+            )
+        else:
+            self.notify(
+                f"Copied song {source_slot:02d} to slot {destination_slot:02d} with patterns; press s to save."
+            )
+        if self.session is not None:
+            self._refresh_state()
 
     def on_mount(self) -> None:
         try:
@@ -835,6 +968,9 @@ class ProjectBrowser(App[None]):
         self.notify("Song name updated in the draft; press s to save")
 
     def action_export_song_file(self) -> None:
+        if self.focused is self.query_one("#songs-table", DataTable):
+            self._set_song_clipboard("cut")
+            return
         if self.session is None:
             return
         song = self.songs[self.active_song_slot]
@@ -1065,6 +1201,9 @@ class ProjectBrowser(App[None]):
         self.notify("Arrangement-only JSON staged; existing patterns are unchanged", timeout=10)
 
     def action_change_pattern(self) -> None:
+        if self.focused is self.query_one("#songs-table", DataTable):
+            self._paste_song_clipboard()
+            return
         if self._active_row_indices() is None:
             return
         self.push_screen(
@@ -1160,7 +1299,12 @@ class ProjectBrowser(App[None]):
             return
         from .tui_patterns import PatternManagerScreen
         self.push_screen(
-            PatternManagerScreen(self.session, self.sessions, bank_filter=bank_filter),
+            PatternManagerScreen(
+                self.session,
+                self.sessions,
+                bank_filter=bank_filter,
+                clipboard_owner=self,
+            ),
             self._on_patterns_closed,
         )
 

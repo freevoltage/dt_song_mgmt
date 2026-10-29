@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
@@ -80,6 +82,9 @@ class PatternManagerScreen(ModalScreen[None]):
         ("7", "filter_bank_g", "Bank G"),
         ("8", "filter_bank_h", "Bank H"),
         ("0", "filter_all_banks", "All banks"),
+        ("y", "yank_pattern", "Yank pattern"),
+        ("x", "cut_pattern_to_clipboard", "Cut pattern"),
+        ("p", "paste_pattern", "Paste pattern"),
         ("c", "copy_pattern", "Copy"),
         ("m", "move_pattern", "Move"),
         ("d", "clear_pattern", "Clear"),
@@ -87,10 +92,11 @@ class PatternManagerScreen(ModalScreen[None]):
         ("i", "import_pattern", "Import"),
     ]
 
-    def __init__(self, session, sessions=None, bank_filter: int | None = None):
+    def __init__(self, session, sessions=None, bank_filter: int | None = None, clipboard_owner=None):
         super().__init__()
         self.session = session
         self.sessions = list(sessions or [session])
+        self.clipboard_owner = clipboard_owner
         self.selected_pattern = 0
         self.filter_text = ""
         self.bank_filter = bank_filter
@@ -137,9 +143,12 @@ class PatternManagerScreen(ModalScreen[None]):
         table = self.query_one("#pattern-table", DataTable)
         patterns = self._visible_patterns()
         bank_label = "ALL BANKS" if self.bank_filter is None else f"BANK {chr(ord('A') + self.bank_filter)}"
-        self.query_one("#pattern-heading", Static).update(
-            f"PATTERN MANAGER · {bank_label} · 1–8 SELECT BANK · 0 ALL"
-        )
+        heading = f"PATTERN MANAGER · {bank_label} · 1–8 SELECT BANK · 0 ALL"
+        clipboard = self._clipboard()
+        if clipboard:
+            action = "CUT" if clipboard["mode"] == "cut" else "COPY"
+            heading += f" · CLIPBOARD {action} {pattern_label(clipboard['slot'])}"
+        self.query_one("#pattern-heading", Static).update(heading)
         table.clear(columns=False)
         for pattern in patterns:
             name = pattern["name"].strip() or "(unnamed)"
@@ -196,6 +205,91 @@ class PatternManagerScreen(ModalScreen[None]):
             self.app.notify(message)
         except Exception as exc:
             self.app.notify(str(exc), severity="error", timeout=8)
+
+    def _clipboard(self) -> dict | None:
+        value = getattr(self.clipboard_owner, "clipboard", None)
+        return value if value and value.get("kind") == "pattern" else None
+
+    def _set_clipboard(self, value: dict | None) -> None:
+        if self.clipboard_owner is not None:
+            self.clipboard_owner.clipboard = value
+
+    def action_yank_pattern(self) -> None:
+        self._set_clipboard({
+            "kind": "pattern",
+            "session": self.session,
+            "slot": self.selected_pattern,
+            "mode": "copy",
+        })
+        self._refresh_table()
+        self.app.notify(f"Copied {pattern_label(self.selected_pattern)} to the pattern clipboard")
+
+    def action_cut_pattern_to_clipboard(self) -> None:
+        self._set_clipboard({
+            "kind": "pattern",
+            "session": self.session,
+            "slot": self.selected_pattern,
+            "mode": "cut",
+        })
+        self._refresh_table()
+        self.app.notify(
+            f"Marked {pattern_label(self.selected_pattern)} to move; choose a destination and press p"
+        )
+
+    def action_paste_pattern(self) -> None:
+        clipboard = self._clipboard()
+        if clipboard is None:
+            self.app.notify("Pattern clipboard is empty", severity="warning")
+            return
+        source_session = clipboard["session"]
+        source = clipboard["slot"]
+        destination = self.selected_pattern
+        is_cut = clipboard["mode"] == "cut"
+        if source_session is self.session and source == destination:
+            self.app.notify("Choose a different destination pattern", severity="warning")
+            return
+        try:
+            if source_session is self.session:
+                operation_type = "pattern_move" if is_cut else "pattern_copy"
+                self.session.stage({"type": operation_type, "src_idx": source, "dst_idx": destination})
+            else:
+                source_raw = source_session.working_raw()
+                source_members = source_session.working_members()
+                source_manifest = json.loads(
+                    next(data for info, data in source_members if info.filename == "manifest.json")
+                )
+                source_cut_staged = False
+                if is_cut:
+                    source_session.stage_pattern_bundle_cut(source)
+                    source_cut_staged = True
+                try:
+                    self.session.stage_pattern_import(
+                        source_session.path,
+                        [{"src_idx": source, "dst_idx": destination}],
+                        source_raw=source_raw,
+                        source_manifest=source_manifest,
+                        source_members=source_members,
+                    )
+                except Exception:
+                    if source_cut_staged:
+                        source_session.undo()
+                    raise
+        except Exception as exc:
+            self.app.notify(f"Could not paste pattern: {exc}", severity="error", timeout=8)
+            return
+        self.selected_pattern = destination
+        if is_cut:
+            self._set_clipboard(None)
+            if source_session is not self.session and self.clipboard_owner is not None:
+                self.clipboard_owner._refresh_tab_labels()
+        self._refresh_table()
+        verb = "Moved" if is_cut else "Pasted"
+        message = f"{verb} {pattern_label(source)} to {pattern_label(destination)} in the draft"
+        if is_cut and source_session is not self.session:
+            message += "; both projects are staged, press s in each project to save"
+        else:
+            message += "; press s to save"
+        self.app.notify(message)
 
     def _prompt_slot(self, title: str, callback) -> None:
         self.app.push_screen(

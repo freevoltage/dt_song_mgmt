@@ -18,6 +18,8 @@ from .constants import (
     PATTERN_STRIDE,
     PROJECT_NAME_LEN,
     SONG_SIZE,
+    SONG_ROW_OFF,
+    SONG_ROW_SIZE,
     SONG_SLOTS,
     device_name,
     kit_stride,
@@ -27,6 +29,8 @@ from .patterns import (
     get_all_patterns_info,
     validate_pattern_mapping,
 )
+from .dt2_samples import pattern_sample_hashes, remap_pattern_sample_pool
+from .archive_assets import apply_asset_delta
 from .project import (
     pack_project,
     patch_project_name,
@@ -37,11 +41,14 @@ from .project import (
 )
 from .songs import (
     collect_pattern_names,
+    empty_song_template,
     get_all_songs_info,
     get_song_info,
+    get_song_rows,
     get_song_slots,
     restore_song_arrangement,
     set_song_slots,
+    song_table_off,
 )
 from .state import apply_operations
 
@@ -73,6 +80,7 @@ class ProjectSession:
         """Append one operation after validating the resulting working image."""
         candidate = [*self.operations, operation]
         self._apply_staged_operations(self.base_raw, candidate)
+        self._members_for_operations(candidate)
         self.operations = candidate
         self.redo_operations.clear()
 
@@ -80,6 +88,7 @@ class ProjectSession:
         """Replace the draft atomically, retaining it only if replay succeeds."""
         candidate = list(operations)
         self._apply_staged_operations(self.base_raw, candidate)
+        self._members_for_operations(candidate)
         self.operations = candidate
         self.redo_operations.clear()
 
@@ -89,6 +98,7 @@ class ProjectSession:
             return False
         candidate = self.operations[:-1]
         self._apply_staged_operations(self.base_raw, candidate)
+        self._members_for_operations(candidate)
         operation = self.operations[-1]
         self.operations = candidate
         self.redo_operations.append(operation)
@@ -101,6 +111,7 @@ class ProjectSession:
         operation = self.redo_operations[-1]
         candidate = [*self.operations, operation]
         self._apply_staged_operations(self.base_raw, candidate)
+        self._members_for_operations(candidate)
         self.operations = candidate
         self.redo_operations.pop()
         return True
@@ -162,7 +173,46 @@ class ProjectSession:
                 source_raw = self._source_image(operation, source_path)
                 if device_name(source_raw, source_path.suffix) != device_name(raw, self.path.suffix):
                     raise ValueError("patterns can only be imported between matching devices")
-                raw = copy_pattern_blocks(source_raw, raw, operation.get("mappings"))
+                mappings = operation.get("mappings")
+                raw = copy_pattern_blocks(source_raw, raw, mappings)
+                if self.device == "DT2":
+                    for item in mappings:
+                        raw, _slot_map, _allocated = remap_pattern_sample_pool(
+                            source_raw, raw, int(item["src_idx"]), int(item["dst_idx"])
+                        )
+            elif op_type == "song_bundle_import":
+                source_path = Path(operation["src_path"]).expanduser().resolve()
+                source_raw = self._source_image(operation, source_path)
+                if device_name(source_raw, source_path.suffix) != device_name(raw, self.path.suffix):
+                    raise ValueError("song bundles can only be imported between matching devices")
+                mappings = operation.get("mappings", [])
+                raw = copy_pattern_blocks(source_raw, raw, mappings)
+                if self.device == "DT2":
+                    for item in mappings:
+                        raw, _slot_map, _allocated = remap_pattern_sample_pool(
+                            source_raw, raw, int(item["src_idx"]), int(item["dst_idx"])
+                        )
+                src_slot = self._song_slot(operation.get("src_slot"), "source")
+                dst_slot = self._song_slot(operation.get("dst_slot"), "destination")
+                source_record = get_song_slots(source_raw)[src_slot]
+                rows = get_song_rows(source_record)
+                mapping = {int(item["src_idx"]): int(item["dst_idx"]) for item in mappings}
+                if any(row[0] not in mapping for row in rows):
+                    raise ValueError("every pattern used by this song must have a destination slot")
+                remapped_record = bytearray(source_record)
+                for row_index, row in enumerate(rows):
+                    remapped_record[SONG_ROW_OFF + row_index * SONG_ROW_SIZE] = mapping[row[0]]
+                slots = get_song_slots(raw)
+                slots[dst_slot] = bytes(remapped_record)
+                raw = set_song_slots(raw, slots)
+            elif op_type == "song_bundle_cut":
+                raw = self._apply_song_bundle_cut(raw, operation)
+            elif op_type == "pattern_bundle_cut":
+                from .patterns import clear_pattern
+                raw = clear_pattern(raw, int(operation["src_idx"]))
+                if operation.get("release_hashes"):
+                    from .dt2_samples import clear_sample_pool_hashes
+                    raw = clear_sample_pool_hashes(raw, set(operation["release_hashes"]))
             else:
                 raw = apply_operations(raw, [operation])
         return raw
@@ -193,6 +243,43 @@ class ProjectSession:
 
     def working_raw(self) -> bytes:
         return self._apply_staged_operations(self.base_raw, self.operations)
+
+    def working_members(self) -> list[tuple]:
+        """Return archive members after replaying staged sample asset deltas."""
+        return self._members_for_operations(self.operations)
+
+    def _members_for_operations(self, operations: list[dict]) -> list[tuple]:
+        members = self.members
+        for operation in operations:
+            additions = operation.get("asset_additions", [])
+            removals = operation.get("asset_removals", [])
+            if additions or removals:
+                members = apply_asset_delta(members, additions, removals)
+        return members
+
+    def working_manifest(self) -> dict:
+        """Return the manifest corresponding to the current staged archive."""
+        for info, data in self.working_members():
+            if info.filename == "manifest.json":
+                try:
+                    return json.loads(data)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    raise ValueError("project manifest is not valid JSON") from None
+        raise ValueError("project archive has no manifest.json")
+
+    @staticmethod
+    def _apply_song_bundle_cut(raw: bytes, operation: dict) -> bytes:
+        from .patterns import clear_pattern
+        slots = get_song_slots(raw)
+        source_slot = ProjectSession._song_slot(operation.get("src_slot"), "source")
+        slots[source_slot] = empty_song_template(raw, song_table_off(raw))
+        raw = set_song_slots(raw, slots)
+        for pattern_index in operation.get("clear_patterns", []):
+            raw = clear_pattern(raw, int(pattern_index))
+        if operation.get("release_hashes"):
+            from .dt2_samples import clear_sample_pool_hashes
+            raw = clear_sample_pool_hashes(raw, set(operation["release_hashes"]))
+        return raw
 
     def state(self) -> dict:
         raw = self.working_raw()
@@ -299,12 +386,13 @@ class ProjectSession:
             return checks
 
         try:
-            member_names = [info.filename for info, _data in self.members]
-            manifest_entries = [(info, data) for info, data in self.members if info.filename == "manifest.json"]
-            payload_entries = [(info, data) for info, data in self.members if info.filename == self.name]
+            draft_members = self.working_members()
+            member_names = [info.filename for info, _data in draft_members]
+            manifest_entries = [(info, data) for info, data in draft_members if info.filename == "manifest.json"]
+            payload_entries = [(info, data) for info, data in draft_members if info.filename == self.name]
             missing_samples = [
                 str(sample.get("FileName", ""))
-                for sample in self.manifest.get("Samples", [])
+                for sample in json.loads(manifest_entries[0][1]).get("Samples", [])
                 if sample.get("FileName") not in member_names
             ]
             unique_names = len(member_names) == len(set(member_names))
@@ -320,7 +408,7 @@ class ProjectSession:
                 add(
                     "Project archive assets",
                     "pass",
-                    f"Manifest and payload are present; all {len(self.manifest.get('Samples', []))} sample files will be preserved.",
+                    f"Manifest and payload are present; all {len(json.loads(manifest_entries[0][1]).get('Samples', []))} sample files will be preserved.",
                 )
             else:
                 detail = "Archive has duplicate member names or is missing its manifest/payload."
@@ -392,6 +480,25 @@ class ProjectSession:
 
     def export_snapshot(self) -> dict:
         raw = self.working_raw()
+        working_members = self.working_members()
+        base_entries = self._manifest_entries(self.members)
+        draft_entries = self._manifest_entries(working_members)
+        base_hashes = {self._entry_hash(entry) for entry in base_entries}
+        draft_by_hash = {self._entry_hash(entry): entry for entry in draft_entries}
+        draft_file_data = {info.filename: data for info, data in working_members}
+        asset_additions = []
+        for sample_hash, entry in draft_by_hash.items():
+            if sample_hash in base_hashes:
+                continue
+            filename = str(entry.get("FileName", ""))
+            if filename not in draft_file_data:
+                raise ValueError(f"snapshot sample asset is missing: {filename}")
+            asset_additions.append({
+                "entry": entry,
+                "filename": filename,
+                "data_base64": base64.b64encode(draft_file_data[filename]).decode("ascii"),
+            })
+        asset_removals = sorted(base_hashes - set(draft_by_hash))
         return {
             "backup_format": "dsm-project-state",
             "version": 1,
@@ -403,6 +510,8 @@ class ProjectSession:
             "image_length": len(raw),
             "image_sha256": hashlib.sha256(raw).hexdigest(),
             "image_base64": base64.b64encode(raw).decode("ascii"),
+            "asset_additions": asset_additions,
+            "asset_removals": asset_removals,
             "songs": get_all_songs_info(raw),
             "patterns": get_all_patterns_info(raw),
         }
@@ -419,19 +528,48 @@ class ProjectSession:
             "image_length": snapshot.get("image_length"),
             "image_sha256": snapshot.get("image_sha256"),
             "image_base64": snapshot.get("image_base64"),
+            "asset_additions": snapshot.get("asset_additions", []),
+            "asset_removals": snapshot.get("asset_removals", []),
         }
         self.replace_operations([operation])
+
+    @staticmethod
+    def _manifest_entries(members: list[tuple]) -> list[dict]:
+        row = next((data for info, data in members if info.filename == "manifest.json"), None)
+        if row is None:
+            raise ValueError("project archive has no manifest.json")
+        try:
+            manifest = json.loads(row)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ValueError("project manifest is not valid JSON") from None
+        entries = manifest.get("Samples", [])
+        if not isinstance(entries, list):
+            raise ValueError("project manifest Samples field must be a list")
+        return [entry for entry in entries if isinstance(entry, dict)]
+
+    @staticmethod
+    def _entry_hash(entry: dict) -> int:
+        try:
+            return int(entry["Hash"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("sample manifest entry has an invalid Hash") from None
 
     def stage_pattern_import(
         self,
         source_path: Path | str,
         mappings: list[dict],
         source_raw: bytes | None = None,
+        source_manifest: dict | None = None,
+        source_members: list[tuple] | None = None,
     ) -> None:
         source = Path(source_path).expanduser().resolve()
         if source == self.path:
             raise ValueError("choose a different source project")
         pairs = validate_pattern_mapping(mappings)
+        if source_manifest is None or source_members is None:
+            source_manifest, _source_payload, source_members = read_project(source)
+            if source_raw is None:
+                _source_head, source_raw = unpack_project(_source_payload)
         operation = {
             "type": "pattern_import",
             "src_path": str(source),
@@ -443,7 +581,138 @@ class ProjectSession:
                 "source_image_length": len(source_raw),
                 "source_image_sha256": hashlib.sha256(source_raw).hexdigest(),
             })
+        if self.device == "DT2" and source_raw is not None:
+            operation["asset_additions"] = self._sample_asset_additions(
+                source_raw,
+                source_manifest,
+                source_members,
+                [src for src, _dst in pairs],
+            )
         self.stage(operation)
+
+    def stage_song_bundle_import(
+        self,
+        source_path: Path | str,
+        src_slot: int,
+        dst_slot: int,
+        mappings: list[dict],
+        source_raw: bytes | None = None,
+        source_manifest: dict | None = None,
+        source_members: list[tuple] | None = None,
+    ) -> None:
+        source = Path(source_path).expanduser().resolve()
+        if source == self.path and source_raw is None:
+            raise ValueError("choose a different source project")
+        source_slot = self._song_slot(src_slot, "source")
+        destination = self._song_slot(dst_slot, "destination")
+        pairs = validate_pattern_mapping(mappings)
+        if source_manifest is None or source_members is None:
+            source_manifest, _source_payload, source_members = read_project(source)
+            if source_raw is None:
+                _source_head, source_raw = unpack_project(_source_payload)
+        if source_raw is None:
+            raise ValueError("source project snapshot is required for a song bundle")
+        source_patterns = {row[0] for row in get_song_rows(get_song_slots(source_raw)[source_slot])}
+        if source_patterns != {src for src, _dst in pairs}:
+            raise ValueError("map each distinct pattern used by the song exactly once")
+        operation = {
+            "type": "song_bundle_import",
+            "src_path": str(source),
+            "src_slot": source_slot,
+            "dst_slot": destination,
+            "mappings": [{"src_idx": src, "dst_idx": dst} for src, dst in pairs],
+            "source_image_base64": base64.b64encode(source_raw).decode("ascii"),
+            "source_image_length": len(source_raw),
+            "source_image_sha256": hashlib.sha256(source_raw).hexdigest(),
+        }
+        if self.device == "DT2":
+            operation["asset_additions"] = self._sample_asset_additions(
+                source_raw, source_manifest, source_members, [src for src, _dst in pairs]
+            )
+        self.stage(operation)
+
+    def stage_song_bundle_cut(self, src_slot: int) -> None:
+        """Stage source-side cleanup after a song bundle has been copied."""
+        source_slot = self._song_slot(src_slot, "source")
+        slots = get_song_slots(self.working_raw())
+        song_patterns = {row[0] for row in get_song_rows(slots[source_slot])}
+        remaining_patterns = {
+            row[0]
+            for index, record in enumerate(slots) if index != source_slot
+            for row in get_song_rows(record)
+        }
+        clear_patterns = sorted(song_patterns - remaining_patterns)
+        release_hashes: set[int] = set()
+        if self.device == "DT2" and clear_patterns:
+            raw = self.working_raw()
+            removed_hashes = set()
+            for pattern_index in clear_patterns:
+                removed_hashes.update(pattern_sample_hashes(raw, pattern_index))
+            remaining_hashes = set()
+            for pattern_index in range(PATTERN_SLOTS):
+                if pattern_index not in clear_patterns:
+                    remaining_hashes.update(pattern_sample_hashes(raw, pattern_index))
+            release_hashes = removed_hashes - remaining_hashes
+        self.stage({
+            "type": "song_bundle_cut",
+            "src_slot": source_slot,
+            "clear_patterns": clear_patterns,
+            "release_hashes": sorted(release_hashes),
+            "asset_removals": sorted(release_hashes),
+        })
+
+    def stage_pattern_bundle_cut(self, pattern_index: int) -> None:
+        if isinstance(pattern_index, bool) or not isinstance(pattern_index, int) or not 0 <= pattern_index < PATTERN_SLOTS:
+            raise ValueError("pattern index must be between 0 and 127")
+        raw = self.working_raw()
+        pattern_info = get_all_patterns_info(raw)[pattern_index]
+        if pattern_info["ref_count"]:
+            raise ValueError("pattern is used by a song; cut the song bundle to move it safely")
+        release_hashes: set[int] = set()
+        if self.device == "DT2":
+            removed_hashes = set(pattern_sample_hashes(raw, pattern_index))
+            remaining_hashes = set()
+            for other in range(PATTERN_SLOTS):
+                if other != pattern_index:
+                    remaining_hashes.update(pattern_sample_hashes(raw, other))
+            release_hashes = removed_hashes - remaining_hashes
+        self.stage({
+            "type": "pattern_bundle_cut",
+            "src_idx": pattern_index,
+            "release_hashes": sorted(release_hashes),
+            "asset_removals": sorted(release_hashes),
+        })
+
+    @staticmethod
+    def _sample_asset_additions(
+        source_raw: bytes,
+        source_manifest: dict,
+        source_members: list[tuple],
+        pattern_indices: list[int],
+    ) -> list[dict]:
+        """Capture only manifest-backed WAV assets needed by copied patterns."""
+        needed_hashes: set[int] = set()
+        for pattern_index in set(pattern_indices):
+            needed_hashes.update(pattern_sample_hashes(source_raw, pattern_index))
+        manifest_by_hash: dict[int, dict] = {}
+        for entry in source_manifest.get("Samples", []):
+            try:
+                manifest_by_hash[int(entry["Hash"])] = entry
+            except (KeyError, TypeError, ValueError):
+                continue
+        member_data = {info.filename: data for info, data in source_members}
+        additions = []
+        for sample_hash in sorted(needed_hashes & manifest_by_hash.keys()):
+            entry = manifest_by_hash[sample_hash]
+            filename = str(entry.get("FileName", ""))
+            if not filename or filename not in member_data:
+                raise ValueError(f"source project is missing sample asset for hash {sample_hash:08X}")
+            additions.append({
+                "entry": entry,
+                "filename": filename,
+                "data_base64": base64.b64encode(member_data[filename]).decode("ascii"),
+            })
+        return additions
 
     def stage_song_file_restore(self, dst_slot: int, record: bytes) -> None:
         destination = self._song_slot(dst_slot, "destination")
@@ -488,10 +757,11 @@ class ProjectSession:
         if self._file_fingerprint() != self._fingerprint:
             raise RuntimeError("project file changed on disk since this session started; reload before applying")
         raw = self.working_raw()
+        members = self.working_members()
         new_payload = pack_project(self.head, raw)
         backup = self.path.with_suffix(self.path.suffix + ".bak")
         shutil.copy2(self.path, backup)
-        write_project(self.path, self.members, self.name, new_payload)
+        write_project(self.path, members, self.name, new_payload)
         self.operations.clear()
         self.redo_operations.clear()
         self._load()
@@ -510,11 +780,12 @@ class ProjectSession:
             raise RuntimeError("source project changed on disk since this session started; reload before saving")
 
         raw, project_name, _old_name = patch_project_name(self.working_raw(), target.stem)
+        members = self.working_members()
         new_payload = pack_project(self.head, raw)
         out_payload_name = project_name
         if target.exists():
             shutil.copy2(target, target.with_suffix(target.suffix + ".bak"))
-        write_project(target, self.members, self.name, new_payload, out_payload_name)
+        write_project(target, members, self.name, new_payload, out_payload_name)
 
         self.path = target
         self.operations.clear()
