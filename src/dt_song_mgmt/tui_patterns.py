@@ -17,11 +17,11 @@ class PatternEntryModal(ModalScreen[str | None]):
     """Prompt for a pattern slot, name, or source project path."""
 
     CSS = """
-    PatternEntryModal { align: center middle; background: $background 60%; }
-    #pattern-entry-dialog { width: 68; height: auto; padding: 1 2; border: round $primary; background: $surface; }
+    PatternEntryModal { align: center middle; background: #000000 70%; }
+    #pattern-entry-dialog { width: 68; height: auto; padding: 1 2; border: solid #c18a3c; background: #111111; }
     #pattern-entry-dialog Input { margin: 1 0; }
     #pattern-entry-buttons { height: 3; align-horizontal: right; }
-    #pattern-entry-buttons Button { margin-left: 1; }
+    #pattern-entry-buttons Button { margin-left: 1; border: none; background: #222222; color: #dedbd2; }
     """
 
     BINDINGS = [("escape", "cancel", "Cancel")]
@@ -62,18 +62,20 @@ class PatternManagerScreen(ModalScreen[None]):
     """Search and stage operations on the 128 pattern slots."""
 
     CSS = """
-    PatternManagerScreen { align: left top; background: #111512; color: #d8dfd7; }
+    PatternManagerScreen { align: left top; background: #101010; color: #dedbd2; }
     #pattern-workspace { width: 100%; height: 100%; padding: 0 2; }
     #pattern-topline { height: 2; padding-top: 1; }
-    #pattern-heading { width: 1fr; color: #e7eee6; text-style: bold; }
-    #pattern-project { width: auto; color: #91a097; }
-    #pattern-banks { height: 2; color: #aab5ac; padding-top: 1; border-bottom: solid #303a33; }
-    #pattern-search { height: 3; margin: 1 0; border: none; background: #1a211c; }
-    #pattern-table { height: 1fr; background: #111512; border: none; }
-    #pattern-table > .datatable--header { background: #1a211c; color: #91a097; }
-    #pattern-table > .datatable--cursor { background: #294336; color: #f1f5ef; }
-    #pattern-selection { height: 2; padding: 0 1; color: #c5d4c8; background: #1a211c; }
-    #pattern-help { height: 2; color: #91a097; padding: 0 1; }
+    #pattern-heading { width: 1fr; color: #e4e0d6; text-style: bold; }
+    #pattern-project { width: auto; color: #a49f93; }
+    #pattern-banks { height: 2; color: #a49f93; padding-top: 1; border-bottom: solid #37342e; }
+    #pattern-search { height: 3; margin: 1 0; border: none; border-bottom: solid #37342e; background: #101010; }
+    #pattern-search:focus { border-bottom: solid #d6a04b; }
+    #pattern-table { height: 1fr; background: #101010; border: none; }
+    #pattern-table > .datatable--header { background: #191919; color: #a49f93; }
+    #pattern-table > .datatable--cursor { background: #25221c; color: #f1c36d; text-style: bold; }
+    #pattern-table:focus > .datatable--cursor { background: #d6a04b; color: #15120d; }
+    #pattern-selection { height: 2; padding: 0 1; color: #f1c36d; border-top: solid #37342e; }
+    #pattern-help { height: 2; color: #8d887d; padding: 0 1; }
     """
 
     BINDINGS = [
@@ -174,11 +176,12 @@ class PatternManagerScreen(ModalScreen[None]):
         bank_items = []
         for bank in range(8):
             name = chr(ord("A") + bank)
-            marker = "●" if self.bank_filter == bank else "○"
-            bank_items.append(f"{marker} {name}[{bank + 1}]")
-        all_marker = "●" if self.bank_filter is None else "○"
+            bank_items.append(
+                f"[{name} {bank + 1}]" if self.bank_filter == bank else f" {name} {bank + 1} "
+            )
+        all_marker = "[ALL 0]" if self.bank_filter is None else " ALL 0 "
         self.query_one("#pattern-banks", Static).update(
-            f"BANKS   {'    '.join(bank_items)}       {all_marker} ALL[0]"
+            f"BANKS   {'  '.join(bank_items)}     {all_marker}"
         )
         table.clear(columns=False)
         for pattern in patterns:
