@@ -392,7 +392,7 @@ class ProjectBrowser(App[None]):
     }
     .navigator-list { height: auto; min-height: 1; }
     #rows-columns { height: 1; color: $text-muted; }
-    #row-detail { height: 4; color: $text-muted; }
+    #row-detail { height: 2; color: $text-muted; }
     #song-detail { height: 1; color: $text-muted; }
     .pane-title.focused { color: $text; text-style: bold reverse; }
     .navigator-list:focus { color: $text; }
@@ -483,13 +483,13 @@ class ProjectBrowser(App[None]):
                 yield Static("", id="song-detail")
             with Vertical(id="rows-pane"):
                 yield Static("SONG ROWS", id="rows-title", classes="pane-title")
-                yield Static(" #  PATTERN/NAME   LABEL  REP BPM LEN", id="rows-columns")
+                yield Static(" #  PATTERN/NAME   LABEL  REP BPM LEN MUTE", id="rows-columns")
                 with VerticalScroll(id="rows-scroll"):
                     yield NavigatorList("", id="rows-list", classes="navigator-list")
                 yield Static("", id="row-detail")
         yield Static(
             "↑↓ move · Tab panes · Enter rows · Space mark · Alt+↑↓ reorder\n"
-            "Songs Y/X/P bundle · Rows p/x/c/m/d · filled play / dim mute · s save · F2/F4",
+            "Songs Y/X/P bundle · Rows p/x/c/m/d · s save · F2 patterns · F4 usage",
             id="message",
         )
         yield Footer()
@@ -817,11 +817,12 @@ class ProjectBrowser(App[None]):
             check = "✓" if index in self.selected_row_indices else " "
             compact_name = (custom_name.strip() or "(unnamed)")[:10]
             label = (row.get("label") or "—")[:5]
+            mute_count = f"{len(muted)}m" if muted else "—"
             line = (
                 f"{marker}{check} {index + 1:02d} {pattern_label(pattern_id):<3} "
                 f"{compact_name:<10} {label:<5} "
                 f"×{row['repeat']:<2} {format_bpm(row['bpm_raw']):>4} "
-                f"{format_length(row['length']):>4}"
+                f"{format_length(row['length']):>4} {mute_count:>3}"
             )
             row_lines.append(line, style="reverse bold" if marker == ">" else None)
             row_lines.append("\n")
@@ -833,25 +834,15 @@ class ProjectBrowser(App[None]):
         if self.active_row_index is not None and song["rows"]:
             active_row = song["rows"][self.active_row_index]
         if active_row is None:
-            detail = Text("Select a row to see its track mute states.")
+            detail = "Select a row to see its full pattern name and muted tracks."
         else:
             pattern_id = active_row["pattern"]
             pattern_name = self.pattern_names[pattern_id].strip() if 0 <= pattern_id < len(self.pattern_names) else ""
-            row_label = active_row.get("label") or "—"
-            detail = Text(
-                f"Row {self.active_row_index + 1:02d} · {pattern_label(pattern_id)} "
-                f"{pattern_name or '(unnamed)'}\n"
-                f"{row_label[:8]} · ×{active_row['repeat']} · {format_bpm(active_row['bpm_raw'])} BPM · "
-                f"{format_length(active_row['length'])} steps\n"
-                "1–8  "
+            muted_tracks = [f"T{track}" for track in range(1, 17) if active_row["mute"] & (1 << (track - 1))]
+            detail = (
+                f"Row {self.active_row_index + 1:02d} · {pattern_label(pattern_id)} {pattern_name or '(unnamed)'} · "
+                f"Muted: {', '.join(muted_tracks) if muted_tracks else 'none'}"
             )
-            for track in range(1, 9):
-                playing = not bool(active_row["mute"] & (1 << (track - 1)))
-                detail.append(f"[{track}]", style="black on white" if playing else "dim")
-            detail.append("\n9–16 ")
-            for track in range(9, 17):
-                playing = not bool(active_row["mute"] & (1 << (track - 1)))
-                detail.append(f"[{track}]", style="black on white" if playing else "dim")
         self.query_one("#row-detail", Static).update(detail)
 
     def _selected_row(self) -> dict | None:
