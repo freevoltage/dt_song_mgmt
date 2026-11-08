@@ -17,6 +17,8 @@ Export paths, directory hierarchy, sizes, and hashes for the full user sample li
 
 ### Feasibility gate
 
-Verify whether the Digitakt/Transfer interface exposes a recursive +Drive listing and stored hashes without downloading sample contents. If SHA-256 must be computed from content, it requires reading all sample bytes; streaming can avoid saving a second copy but cannot avoid reading/transferring those bytes. Transfer's published manual also states the FACTORY folder is not accessible in its Explore view.
+Validate Elektroid's read-only CLI against the connected Digitakt II. It documents sample directory listings with file sizes and an internal checksum, and supports Digitakt II. Check that the installed build exposes the device's sample filesystem, walk nested directories, and determine whether its checksum is suitable as the export hash. If SHA-256 must be computed from content, every sample byte must be read; streaming avoids saving a second copy but does not avoid reading/transferring those bytes. Confirm whether factory sample paths are exposed too.
 
 The existing `.dt2prj` export only describes samples included in that project. It is not a full +Drive inventory.
+
+Elektroid 3.3.2 is installed on the development Mac. Its first live CLI probe could not initialize a MIDI client while Elektron Transfer was connected, so repeat the read-only probe after Transfer releases the device.

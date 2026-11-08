@@ -10,31 +10,31 @@ The requested output is metadata only: folder paths, filenames, sizes, and hashe
 
 The current `dsm samples export <project.dt2prj>` command indexes samples contained in one project archive. It does **not** enumerate the full +Drive library, so it does not meet the full-library request.
 
-Elektron's Digitakt II manual describes the +Drive sample hierarchy and transferring samples from the device through Elektron Transfer. Elektron's Transfer manual says its Explore page can browse and transfer files/folders, but the public documentation does not describe a metadata-only API for exporting the complete folder index and hashes. It also says the device's FACTORY folder is not accessible in Transfer. See the [Digitakt II manual](https://www.elektron.se/wp-content/uploads/2025/06/Digitakt-2-User-Manual_ENG_OS1.15_250625.pdf) and [Elektron Transfer manual](https://www.elektron.se/wp-content/uploads/2026/03/Transfer-User-Manual_ENG_OS1.10_260304.pdf).
+Elektroid is an open source Elektron Transfer alternative with a CLI and a documented sample-list operation. Its `elektron:sample:ls` output includes item type, size, and an internal checksum; listings are requested for a directory path. Elektroid documents Digitakt II support. This looks like a practical read-only source for the inventory, subject to verifying that the installed version exposes the Digitakt II sample filesystem and that we can recursively walk the complete +Drive tree. See the [Elektroid repository and CLI documentation](https://github.com/dagargo/elektroid).
 
 ## Feasibility gate
 
-Before building the full-library exporter, determine whether the Digitakt/Transfer USB protocol exposes:
+Before building the full-library exporter, validate Elektroid against the connected Digitakt II:
 
-1. A recursive listing of user sample paths and directories.
-2. File sizes.
-3. A device-stored hash or checksum for each sample.
+1. The Digitakt II's supported Elektroid filesystems using its read-only device-info command.
+2. Whether `elektron:sample:ls` can enumerate directories recursively without downloads.
+3. Whether the reported size and internal checksum are useful as the exported size/hash fields.
 
-If the device exposes these fields, export them directly without downloading audio. If it exposes paths and sizes but no hash, decide whether the inventory may omit hashes or whether a streaming read of sample bytes is acceptable. Computing SHA-256 necessarily reads every sample byte; streaming avoids saving a duplicate but still transfers/reads the full audio data.
+If Elektroid exposes the required fields, export them directly without downloading audio. If its internal checksum is not a stable content hash, decide whether to export it as a device checksum, omit a cryptographic hash, or stream sample bytes for SHA-256. Computing SHA-256 necessarily reads every sample byte; streaming avoids saving a duplicate but still transfers/reads the full audio data.
 
 ## Implementation steps
 
-1. Use an attached Digitakt II and Elektron Transfer to inspect the read-only device listing and determine what metadata is available. Do not move or alter device files.
-2. Inspect the official Transfer interface/protocol or run a small read-only protocol probe to verify recursive path, size, and hash availability. Avoid implementing a guessed protocol.
+1. Ensure Elektron Transfer is disconnected so it does not hold the MIDI interface, then use Elektroid's read-only device-info and sample-list commands against the attached Digitakt II. Do not run upload, delete, move, or download commands.
+2. Verify recursive path, size, and checksum behavior on a nested folder and on a sample, without reading sample contents.
 3. If metadata-only enumeration is supported, implement a Digitakt-only exporter with a versioned JSON schema: directories, relative paths, filenames, sizes, device hashes, export timestamp, and any unreadable-entry errors.
 4. Keep the existing project-archive exporter clearly labeled as project-only; it may remain a separate export mode but must not be presented as the full library inventory.
 5. Validate the full inventory against the Digitakt's displayed +Drive hierarchy, including nested directories and user samples not referenced by the current project.
 
 ## What is needed
 
-- A Digitakt II connected by USB with Elektron Transfer installed and connected.
-- The Digitakt OS version and Elektron Transfer version for reproducing the protocol behavior.
-- Clarification whether “whole library” means user samples only or whether factory samples must also appear. Transfer's manual says its Explore view cannot access the FACTORY folder.
+- A Digitakt II connected by USB, with Elektroid installed.
+- The Digitakt OS version and Elektroid version for reproducing the listing behavior.
+- Clarification whether “whole library” includes the factory folder as well as user samples.
 - If no hash is exposed by the device, a decision on whether SHA-256 may be computed by streaming every sample without saving the bytes.
 
 ## Completion criteria
