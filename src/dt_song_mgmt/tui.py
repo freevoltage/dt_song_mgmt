@@ -74,7 +74,7 @@ class SongPatternMappingModal(ModalScreen[list[dict] | None]):
 
     CSS = """
     SongPatternMappingModal { align: center middle; background: $background 60%; }
-    #song-pattern-map-dialog { width: 96%; height: 90%; padding: 1 2; border: solid $primary; background: $surface; }
+    #song-pattern-map-dialog { width: 84; max-width: 96%; height: auto; max-height: 85%; padding: 1 2; border: solid $primary; background: $surface; }
     #mapping-context { height: 2; }
     #mapping-columns { height: 1; text-style: bold; }
     #mapping-rows { height: 1fr; }
