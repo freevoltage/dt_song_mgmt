@@ -7,10 +7,11 @@ import math
 import re
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Label, Static, Tab, Tabs
+from textual.widgets import Button, Footer, Input, Label, Static, Tab, Tabs
 
 from .session import ProjectSession
 from .songs import (
@@ -306,6 +307,25 @@ class UnsavedExitModal(ModalScreen[str | None]):
         self.dismiss("stay")
 
 
+class NavigatorList(Static):
+    """Focusable text list for the main song and row navigators."""
+
+    can_focus = True
+
+    def on_key(self, event) -> None:
+        action = {
+            "up": "action_move_cursor_up",
+            "down": "action_move_cursor_down",
+            "pageup": "action_move_cursor_page_up",
+            "pagedown": "action_move_cursor_page_down",
+            "home": "action_move_cursor_home",
+            "end": "action_move_cursor_end",
+        }.get(event.key)
+        if action:
+            event.stop()
+            getattr(self.app, action)()
+
+
 class ProjectBrowser(App[None]):
     """Browse a project's song slots and song rows in the terminal."""
 
@@ -314,34 +334,34 @@ class ProjectBrowser(App[None]):
     CSS = """
     Screen {
         layout: vertical;
-        background: #101010;
+        background: $background;
     }
     #project-header {
         height: 2;
         padding: 0 2;
-        background: #101010;
-        border-bottom: solid #37342e;
+        background: $background;
+        border-bottom: solid $panel;
     }
     #project-tabs {
         height: 2;
-        background: #101010;
+        background: $background;
         padding: 0 1;
     }
-    Tabs { background: #101010; }
-    Tab { background: #101010; color: #8d887d; border: none; }
-    Tab.-active { background: #101010; color: #d6a04b; text-style: bold; }
-    Tabs > .underline--bar { color: #d6a04b; background: #d6a04b; }
+    Tabs { background: $background; }
+    Tab { background: $background; color: $text-muted; border: none; }
+    Tab.-active { background: $background; color: $text; text-style: bold; }
+    Tabs > .underline--bar { color: $primary; background: $primary; }
     #project-banner {
         width: 1fr;
         content-align: left middle;
-        color: #e4e0d6;
+        color: $text;
         text-style: bold;
     }
     #device-banner {
         width: auto;
         min-width: 26;
         content-align: right middle;
-        color: #d6a04b;
+        color: $primary;
         text-style: bold;
     }
     #workspace {
@@ -352,54 +372,47 @@ class ProjectBrowser(App[None]):
     #songs-pane {
         width: 30;
         min-width: 24;
-        border-right: solid #37342e;
-        padding: 0 2 0 0;
+        border-right: solid $panel;
+        padding: 0 1 0 0;
     }
     #rows-pane {
         width: 1fr;
         min-width: 32;
-        padding: 0 0 0 2;
+        padding: 0 0 0 1;
     }
     .pane-title {
-        height: 2;
+        height: 1;
         margin: 0;
-        color: #a49f93;
+        color: $text-muted;
         text-style: bold;
     }
-    DataTable {
+    #songs-scroll, #rows-scroll {
         height: 1fr;
-        background: #101010;
-        border: none;
+        scrollbar-color: $text-muted;
     }
-    DataTable > .datatable--header {
-        background: #191919;
-        color: #a49f93;
-    }
-    DataTable > .datatable--cursor {
-        background: #25221c;
-        color: #f1c36d;
-        text-style: bold;
-    }
-    DataTable:focus > .datatable--cursor {
-        background: #d6a04b;
-        color: #15120d;
-    }
+    .navigator-list { height: auto; min-height: 1; }
+    #rows-columns { height: 1; color: $text-muted; }
+    #row-detail { height: 2; color: $text-muted; }
+    #song-detail { height: 1; color: $text-muted; }
+    .pane-title.focused { color: $text; text-style: bold reverse; }
+    .navigator-list:focus { color: $text; }
     #message {
         height: 2;
-        color: #a49f93;
+        color: $text-muted;
         padding: 0 2;
-        background: #101010;
-        border-top: solid #37342e;
+        background: $background;
+        border-top: solid $panel;
     }
-    Footer { background: #101010; color: #a49f93; }
-    FooterKey { background: #101010; }
-    FooterKey > .footer-key--key { background: #25221c; color: #d6a04b; }
-    Button { border: none; background: #222222; color: #dedbd2; }
+    Footer { background: $background; color: $text-muted; }
+    FooterKey { background: $background; }
+    FooterKey > .footer-key--key { background: $panel; color: $text; }
+    Button { border: none; background: $panel; color: $text; }
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("escape", "quit", "Quit"),
-        ("tab", "focus_next", "Switch pane"),
+        ("tab", "switch_pane", "Switch pane"),
+        ("enter", "focus_song_rows", "Open song rows"),
         ("space", "toggle_row_selection", "Select row"),
         ("p", "change_pattern", "Set row pattern"),
         ("d", "delete_row", "Delete row"),
@@ -464,23 +477,32 @@ class ProjectBrowser(App[None]):
         yield Tabs(Tab(self.project_path.name, id="project-0"), id="project-tabs")
         with Horizontal(id="workspace"):
             with Vertical(id="songs-pane"):
-                yield Static("SONG SLOTS", classes="pane-title")
-                yield DataTable(id="songs-table", cursor_type="row", zebra_stripes=True)
+                yield Static("SONGS", id="songs-title", classes="pane-title")
+                with VerticalScroll(id="songs-scroll"):
+                    yield NavigatorList("", id="songs-list", classes="navigator-list")
+                yield Static("", id="song-detail")
             with Vertical(id="rows-pane"):
-                yield Static("SONG ROWS", classes="pane-title")
-                yield DataTable(id="rows-table", cursor_type="row", zebra_stripes=True)
-        yield Static("Space select rows · Alt+↑/↓ reorder · c copy · m move · Y/X/P song bundle on slots · s save · F2 patterns · F4 song patterns", id="message")
+                yield Static("SONG ROWS", id="rows-title", classes="pane-title")
+                yield Static(" #  PATTERN/NAME   LABEL  REP BPM LEN MUTE", id="rows-columns")
+                with VerticalScroll(id="rows-scroll"):
+                    yield NavigatorList("", id="rows-list", classes="navigator-list")
+                yield Static("", id="row-detail")
+        yield Static(
+            "↑↓ move · Tab panes · Enter rows · Space mark · Alt+↑↓ reorder\n"
+            "Songs Y/X/P bundle · Rows p/x/c/m/d · s save · F2 patterns · F4 usage",
+            id="message",
+        )
         yield Footer()
 
     def on_key(self, event) -> None:
-        """Use Y/X/P for song bundles only while the song-slot table is focused."""
+        """Use y for song bundles only while the song list is focused."""
         if event.key != "y" or self.session is None:
             return
         try:
-            songs_table = self.query_one("#songs-table", DataTable)
+            songs_list = self.query_one("#songs-list", NavigatorList)
         except Exception:
             return
-        if self.focused is not songs_table:
+        if self.focused is not songs_list:
             return
         event.stop()
         self._set_song_clipboard("copy")
@@ -591,12 +613,9 @@ class ProjectBrowser(App[None]):
             )
             return
 
-        songs_table = self.query_one("#songs-table", DataTable)
-        songs_table.add_columns("Slot", "Song", "Rows")
-        rows_table = self.query_one("#rows-table", DataTable)
-        rows_table.add_columns("#", "Pattern", "Label", "Rep", "BPM", "Length", "Muted tracks")
         self._refresh_state()
-        songs_table.focus()
+        self.query_one("#songs-list", NavigatorList).focus()
+        self._refresh_pane_titles()
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
         if event.tab is None:
@@ -663,33 +682,84 @@ class ProjectBrowser(App[None]):
     def action_previous_project(self) -> None:
         self.query_one("#project-tabs", Tabs).action_previous_tab()
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.data_table.id != "songs-table":
-            return
-        try:
-            slot = int(event.row_key.value)
-        except (TypeError, ValueError):
-            return
-        self.active_song_slot = slot
-        self.active_row_index = None
-        self.selected_row_indices.clear()
-        self._show_song(slot)
+    def action_switch_pane(self) -> None:
+        songs_list = self.query_one("#songs-list", NavigatorList)
+        rows_list = self.query_one("#rows-list", NavigatorList)
+        (rows_list if self.focused is songs_list else songs_list).focus()
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.row_key is None:
-            return
-        try:
-            index = int(event.row_key.value)
-        except (TypeError, ValueError):
-            return
-        if event.data_table.id == "songs-table":
-            if index != self.active_song_slot:
+    def action_focus_song_rows(self) -> None:
+        if self.focused is self.query_one("#songs-list", NavigatorList):
+            self.query_one("#rows-list", NavigatorList).focus()
+
+    def _move_cursor(self, delta: int | None = None, edge: str | None = None) -> None:
+        songs_list = self.query_one("#songs-list", NavigatorList)
+        rows_list = self.query_one("#rows-list", NavigatorList)
+        if self.focused is songs_list and self.songs:
+            slots = [song["slot"] for song in self.songs]
+            current = slots.index(self.active_song_slot) if self.active_song_slot in slots else 0
+            if edge == "first":
+                target = 0
+            elif edge == "last":
+                target = len(slots) - 1
+            else:
+                target = max(0, min(len(slots) - 1, current + (delta or 0)))
+            if slots[target] != self.active_song_slot:
+                self.active_song_slot = slots[target]
+                self.active_row_index = None
                 self.selected_row_indices.clear()
-            self.active_song_slot = index
-            self.active_row_index = None
-            self._show_song(index)
-        elif event.data_table.id == "rows-table":
-            self.active_row_index = index
+                self._refresh_state()
+        elif self.focused is rows_list and self.songs:
+            rows = self.songs[self.active_song_slot]["rows"]
+            if not rows:
+                self.active_row_index = None
+                self._show_song(self.active_song_slot)
+                return
+            current = self.active_row_index if self.active_row_index is not None else -1
+            if edge == "first":
+                self.active_row_index = 0
+            elif edge == "last":
+                self.active_row_index = len(rows) - 1
+            else:
+                self.active_row_index = max(0, min(len(rows) - 1, current + (delta or 0)))
+            self._show_song(self.active_song_slot)
+
+    def action_move_cursor_up(self) -> None:
+        self._move_cursor(-1)
+
+    def action_move_cursor_down(self) -> None:
+        self._move_cursor(1)
+
+    def action_move_cursor_page_up(self) -> None:
+        self._move_cursor(-12)
+
+    def action_move_cursor_page_down(self) -> None:
+        self._move_cursor(12)
+
+    def action_move_cursor_home(self) -> None:
+        self._move_cursor(edge="first")
+
+    def action_move_cursor_end(self) -> None:
+        self._move_cursor(edge="last")
+
+    def on_descendant_focus(self, event) -> None:
+        if self.is_mounted:
+            self._refresh_pane_titles()
+
+    def _refresh_pane_titles(self) -> None:
+        try:
+            songs_focused = self.focused is self.query_one("#songs-list", NavigatorList)
+            rows_focused = self.focused is self.query_one("#rows-list", NavigatorList)
+            songs_title = self.query_one("#songs-title", Static)
+            rows_title = self.query_one("#rows-title", Static)
+            songs_title.update(("> " if songs_focused else "  ") + "SONGS")
+            rows_title.update(
+                ("> " if rows_focused else "  ")
+                + f"SONG {self.active_song_slot:02d}  {self.songs[self.active_song_slot]['name']}"
+            )
+            songs_title.set_class(songs_focused, "focused")
+            rows_title.set_class(rows_focused, "focused")
+        except Exception:
+            return
 
     def _refresh_state(self) -> None:
         if self.session is None:
@@ -699,6 +769,8 @@ class ProjectBrowser(App[None]):
         self.pattern_names = collect_pattern_names(self.session.working_raw())
         if self.songs:
             self.active_song_slot = min(self.active_song_slot, len(self.songs) - 1)
+            if self.active_row_index is None and self.songs[self.active_song_slot]["rows"]:
+                self.active_row_index = 0
         pending = state["pending_changes"]
         marker = f"DRAFT {pending}" if pending else "CLEAN"
         self.query_one("#project-banner", Static).update(
@@ -706,51 +778,72 @@ class ProjectBrowser(App[None]):
         )
         self.query_one("#device-banner", Static).update(f"{self.device}  ·  {marker}")
         self._refresh_tab_labels()
-        songs_table = self.query_one("#songs-table", DataTable)
-        songs_table.clear(columns=False)
+        song_lines = Text()
         for song in self.songs:
-            songs_table.add_row(
-                f"{song['slot']:02d}", song["name"], str(song["row_count"]),
-                key=str(song["slot"]),
-            )
+            marker = ">" if song["slot"] == self.active_song_slot else " "
+            name = song["name"].strip() or "(unnamed)"
+            line = f"{marker} {song['slot']:02d}  {name[:16]:<16}  {song['row_count']:>2}r"
+            song_lines.append(line, style="reverse bold" if marker == ">" else None)
+            song_lines.append("\n")
+        self.query_one("#songs-list", NavigatorList).update(song_lines)
+        self.query_one("#songs-scroll", VerticalScroll).scroll_to(
+            y=self.active_song_slot, animate=False, force=True
+        )
         if self.songs:
-            songs_table.move_cursor(row=self.active_song_slot, column=0)
             self._show_song(self.active_song_slot)
+        self.query_one("#song-detail", Static).update(
+            f"{self.active_song_slot:02d} · {self.songs[self.active_song_slot]['row_count']} rows"
+            if self.songs else "No songs"
+        )
+        self._refresh_pane_titles()
 
     def _show_song(self, slot: int) -> None:
-        rows_table = self.query_one("#rows-table", DataTable)
-        rows_table.clear(columns=False)
         song = self.songs[slot]
         valid_indices = set(range(len(song["rows"])))
         self.selected_row_indices.intersection_update(valid_indices)
-        selected_row = self.active_row_index
-        for index, row in enumerate(song["rows"]):
-            pattern_id = row["pattern"]
-            pattern_name = row.get("pattern_name") or pattern_label(pattern_id)
-            custom_name = self.pattern_names[pattern_id] if 0 <= pattern_id < len(self.pattern_names) else ""
-            if custom_name:
-                pattern_name = f"{pattern_name} {custom_name}"
-            muted = [f"T{track}" for track in range(1, 17) if row["mute"] & (1 << (track - 1))]
-            rows_table.add_row(
-                f"{'✓' if index in self.selected_row_indices else ' '} {index + 1}",
-                pattern_name,
-                row["label"] or "—",
-                f"×{row['repeat']}",
-                format_bpm(row["bpm_raw"]),
-                format_length(row["length"]),
-                ",".join(muted) if muted else "—",
-                key=str(index),
-            )
         self.active_row_index = (
-            min(selected_row, len(song["rows"]) - 1)
-            if selected_row is not None and song["rows"]
+            min(self.active_row_index, len(song["rows"]) - 1)
+            if self.active_row_index is not None and song["rows"]
             else None
         )
+        selected_row = self.active_row_index
+        row_lines = Text()
+        active_row = None
+        for index, row in enumerate(song["rows"]):
+            pattern_id = row["pattern"]
+            custom_name = self.pattern_names[pattern_id] if 0 <= pattern_id < len(self.pattern_names) else ""
+            muted = [f"T{track}" for track in range(1, 17) if row["mute"] & (1 << (track - 1))]
+            marker = ">" if index == selected_row else " "
+            check = "✓" if index in self.selected_row_indices else " "
+            compact_name = (custom_name.strip() or "(unnamed)")[:10]
+            label = (row.get("label") or "—")[:5]
+            mute_count = f"{len(muted)}m" if muted else "—"
+            line = (
+                f"{marker}{check} {index + 1:02d} {pattern_label(pattern_id):<3} "
+                f"{compact_name:<10} {label:<5} "
+                f"×{row['repeat']:<2} {format_bpm(row['bpm_raw']):>4} "
+                f"{format_length(row['length']):>4} {mute_count:>3}"
+            )
+            row_lines.append(line, style="reverse bold" if marker == ">" else None)
+            row_lines.append("\n")
+        self.query_one("#rows-list", NavigatorList).update(row_lines)
         if self.active_row_index is not None:
-            rows_table.move_cursor(row=self.active_row_index, column=0)
-        self.query_one("#rows-pane .pane-title", Static).update(
-            f"SONG {slot:02d}  ·  {song['name']}  ·  {song['row_count']} ROWS"
-        )
+            self.query_one("#rows-scroll", VerticalScroll).scroll_to(
+                y=self.active_row_index, animate=False, force=True
+            )
+        if self.active_row_index is not None and song["rows"]:
+            active_row = song["rows"][self.active_row_index]
+        if active_row is None:
+            detail = "Select a row to see its full pattern name and muted tracks."
+        else:
+            pattern_id = active_row["pattern"]
+            pattern_name = self.pattern_names[pattern_id].strip() if 0 <= pattern_id < len(self.pattern_names) else ""
+            muted_tracks = [f"T{track}" for track in range(1, 17) if active_row["mute"] & (1 << (track - 1))]
+            detail = (
+                f"Row {self.active_row_index + 1:02d} · {pattern_label(pattern_id)} {pattern_name or '(unnamed)'} · "
+                f"Muted: {', '.join(muted_tracks) if muted_tracks else 'none'}"
+            )
+        self.query_one("#row-detail", Static).update(detail)
 
     def _selected_row(self) -> dict | None:
         if self.active_row_index is None:
@@ -1084,7 +1177,7 @@ class ProjectBrowser(App[None]):
         self.notify("Song name updated in the draft; press s to save")
 
     def action_export_song_file(self) -> None:
-        if self.focused is self.query_one("#songs-table", DataTable):
+        if self.focused is self.query_one("#songs-list", NavigatorList):
             self._set_song_clipboard("cut")
             return
         if self.session is None:
@@ -1317,7 +1410,7 @@ class ProjectBrowser(App[None]):
         self.notify("Arrangement-only JSON staged; existing patterns are unchanged", timeout=10)
 
     def action_change_pattern(self) -> None:
-        if self.focused is self.query_one("#songs-table", DataTable):
+        if self.focused is self.query_one("#songs-list", NavigatorList):
             self._paste_song_clipboard()
             return
         if self._active_row_indices() is None:
