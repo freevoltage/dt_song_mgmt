@@ -65,6 +65,7 @@ class PatternManagerScreen(ModalScreen[None]):
     PatternManagerScreen { align: center middle; background: $background 60%; }
     #pattern-window { width: 94%; height: 90%; border: round $primary; background: $surface; padding: 1 2; }
     #pattern-heading { height: 1; color: $text; text-style: bold; }
+    #pattern-help { height: 3; color: $text-muted; }
     #pattern-search { height: 3; margin: 1 0; }
     #pattern-table { height: 1fr; }
     DataTable:focus { border: tall $accent; }
@@ -104,6 +105,12 @@ class PatternManagerScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="pattern-window"):
             yield Static("PATTERN MANAGER", id="pattern-heading")
+            yield Static(
+                "All 128 slots are listed, including unnamed ones.\n"
+                "↑/↓ select · PgUp/PgDn scroll · 1–8 banks · 0 all · / search\n"
+                "c copy · m move · d clear · r rename · i import · y/x/p clipboard",
+                id="pattern-help",
+            )
             yield Input(placeholder="Filter by bank, slot, or pattern name…", id="pattern-search")
             yield DataTable(id="pattern-table", cursor_type="row", zebra_stripes=True)
         yield Footer()
@@ -127,23 +134,21 @@ class PatternManagerScreen(ModalScreen[None]):
         except (TypeError, ValueError):
             pass
 
-    def _visible_patterns(self) -> list[dict]:
-        patterns = get_all_patterns_info(self.session.working_raw())
-        if self.bank_filter is not None:
-            patterns = [pattern for pattern in patterns if pattern["index"] // 16 == self.bank_filter]
-        if not self.filter_text:
-            return patterns
-        return [
-            pattern for pattern in patterns
-            if self.filter_text in pattern["label"].casefold()
-            or self.filter_text in pattern["name"].casefold()
-        ]
-
     def _refresh_table(self) -> None:
         table = self.query_one("#pattern-table", DataTable)
-        patterns = self._visible_patterns()
+        all_patterns = get_all_patterns_info(self.session.working_raw())
+        patterns = all_patterns
+        if self.bank_filter is not None:
+            patterns = [pattern for pattern in patterns if pattern["index"] // 16 == self.bank_filter]
+        if self.filter_text:
+            patterns = [
+                pattern for pattern in patterns
+                if self.filter_text in pattern["label"].casefold()
+                or self.filter_text in pattern["name"].casefold()
+            ]
         bank_label = "ALL BANKS" if self.bank_filter is None else f"BANK {chr(ord('A') + self.bank_filter)}"
-        heading = f"PATTERN MANAGER · {bank_label} · 1–8 SELECT BANK · 0 ALL"
+        named_count = sum(bool(pattern["name"].strip()) for pattern in all_patterns)
+        heading = f"PATTERN MANAGER · {bank_label} · {len(patterns)} slots shown · {named_count}/128 named"
         clipboard = self._clipboard()
         if clipboard:
             action = "CUT" if clipboard["mode"] == "cut" else "COPY"
