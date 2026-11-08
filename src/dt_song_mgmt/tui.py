@@ -69,40 +69,6 @@ class EntryModal(ModalScreen[str | None]):
             self.dismiss(None)
 
 
-class RowFieldModal(ModalScreen[str | None]):
-    """Choose which field of the selected song row to edit."""
-
-    CSS = """
-    RowFieldModal { align: center middle; background: #000000 70%; }
-    #row-field-dialog { width: 42; height: auto; padding: 1 2; border: solid #c18a3c; background: #111111; }
-    #row-field-dialog Button { width: 1fr; margin: 0 0 1 0; border: none; background: #222222; color: #dedbd2; }
-    """
-
-    FIELDS = (
-        ("pattern", "Pattern"),
-        ("repeat", "Repeat count"),
-        ("bpm", "Tempo (BPM)"),
-        ("length", "Row length"),
-        ("mutes", "Track mutes"),
-    )
-    BINDINGS = [("escape", "cancel", "Cancel")]
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="row-field-dialog"):
-            yield Label("Edit song row")
-            for field, label in self.FIELDS:
-                yield Button(label, id=f"field-{field}")
-
-    def on_mount(self) -> None:
-        self.query_one("#field-pattern", Button).focus()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id.removeprefix("field-"))
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
 class SongPatternMappingModal(ModalScreen[list[dict] | None]):
     """Edit a song bundle's source-to-destination pattern slot mapping."""
 
@@ -346,14 +312,27 @@ class NavigatorList(Static):
 
     can_focus = True
 
-    def on_key(self, event) -> None:
+    def _horizontal_target(self, event) -> bool:
         if event.key == "left" and self.id == "rows-list":
-            event.stop()
-            self.app.query_one("#songs-list", NavigatorList).focus()
-            return
+            if self.app.active_row_column == 0:
+                self.app.query_one("#songs-list", NavigatorList).focus()
+            else:
+                self.app.active_row_column -= 1
+                self.app._show_song(self.app.active_song_slot)
+            return True
         if event.key == "right" and self.id == "songs-list":
-            event.stop()
             self.app.query_one("#rows-list", NavigatorList).focus()
+            return True
+        if event.key == "right" and self.id == "rows-list":
+            if self.app.active_row_column < len(self.app.ROW_COLUMNS) - 1:
+                self.app.active_row_column += 1
+                self.app._show_song(self.app.active_song_slot)
+            return True
+        return False
+
+    def on_key(self, event) -> None:
+        if self._horizontal_target(event):
+            event.stop()
             return
         action = {
             "up": "action_move_cursor_up",
@@ -373,6 +352,7 @@ class ProjectBrowser(App[None]):
 
     TITLE = "Elektron Digi Song Mode Manager"
     SUB_TITLE = "Project browser"
+    ROW_COLUMNS = ("pattern", "label", "repeat", "bpm", "length", "mutes")
     CSS = """
     Screen {
         layout: vertical;
@@ -506,6 +486,7 @@ class ProjectBrowser(App[None]):
         self._active_tab_id = "project-0"
         self.active_song_slot = 0
         self.active_row_index: int | None = None
+        self.active_row_column = 0
         self.selected_row_indices: set[int] = set()
 
     def compose(self) -> ComposeResult:
@@ -521,14 +502,14 @@ class ProjectBrowser(App[None]):
                 yield Static("", id="song-detail")
             with Vertical(id="rows-pane"):
                 yield Static("SONG ROWS", id="rows-title", classes="pane-title")
-                yield Static(" #  PATTERN/NAME   LABEL  REP BPM LEN", id="rows-columns")
+                yield Static("  #  PATTERN/NAME       LABEL  REP   BPM   LEN  MUTES", id="rows-columns")
                 with VerticalScroll(id="rows-scroll"):
                     yield NavigatorList("", id="rows-list", classes="navigator-list")
                 yield Static("", id="row-detail")
         yield Static("", id="mute-display")
         yield Static(
-            "↑↓ move · ← songs / rows → · Tab panes · Enter rows/edit · Space mark · Alt+↑↓ reorder\n"
-            "Songs Y/X/P bundle · Rows Enter edit, c/m/d · filled = playing · outline = muted · s save",
+            "↑↓ move rows · ←/→ move columns · Tab / ← at Pattern returns to songs · Enter edits cell\n"
+            "Songs Y/X/P bundle · Rows c/m/d · filled = playing · outline = muted · s save",
             id="message",
         )
         yield Footer()
@@ -735,21 +716,19 @@ class ProjectBrowser(App[None]):
         elif self.focused is self.query_one("#rows-list", NavigatorList):
             if self._selected_row() is None:
                 return
-            self.push_screen(RowFieldModal(), self._on_row_field_selected)
-
-    def _on_row_field_selected(self, field: str | None) -> None:
-        if field is None:
-            return
-        if field == "pattern":
-            self.action_change_pattern()
-        elif field == "repeat":
-            self.action_edit_repeat()
-        elif field == "bpm":
-            self.action_edit_bpm()
-        elif field == "length":
-            self.action_edit_length()
-        elif field == "mutes":
-            self.action_toggle_mute()
+            field = self.ROW_COLUMNS[self.active_row_column]
+            if field == "pattern":
+                self.action_change_pattern()
+            elif field == "repeat":
+                self.action_edit_repeat()
+            elif field == "bpm":
+                self.action_edit_bpm()
+            elif field == "length":
+                self.action_edit_length()
+            elif field == "mutes":
+                self.action_toggle_mute()
+            elif field == "label":
+                self.notify("The row label is read-only", severity="warning")
 
     def _move_cursor(self, delta: int | None = None, edge: str | None = None) -> None:
         songs_list = self.query_one("#songs-list", NavigatorList)
@@ -869,6 +848,8 @@ class ProjectBrowser(App[None]):
         selected_row = self.active_row_index
         row_lines = Text()
         active_row = None
+        rows_list = self.query_one("#rows-list", NavigatorList)
+        rows_focused = self.focused is rows_list
         for index, row in enumerate(song["rows"]):
             pattern_id = row["pattern"]
             custom_name = self.pattern_names[pattern_id] if 0 <= pattern_id < len(self.pattern_names) else ""
@@ -876,15 +857,24 @@ class ProjectBrowser(App[None]):
             check = "✓" if index in self.selected_row_indices else " "
             compact_name = (custom_name.strip() or "(unnamed)")[:10]
             label = (row.get("label") or "—")[:5]
-            line = (
-                f"{marker}{check} {index + 1:02d} {pattern_label(pattern_id):<3} "
-                f"{compact_name:<10} {label:<5} "
-                f"×{row['repeat']:<2} {format_bpm(row['bpm_raw']):>4} "
-                f"{format_length(row['length']):>4}"
+            row_lines.append(f"{marker}{check} {index + 1:02d} ")
+            cells = (
+                ("pattern", f"{pattern_label(pattern_id):<3} {compact_name:<10}"),
+                ("label", f"{label:<5}"),
+                ("repeat", f"×{row['repeat']:<2}"),
+                ("bpm", f"{format_bpm(row['bpm_raw']):>7}"),
+                ("length", f"{format_length(row['length']):>4}"),
+                ("mutes", "16 trk"),
             )
-            row_lines.append(line, style="reverse bold" if marker == ">" else None)
+            for column, (field, value) in enumerate(cells):
+                style = None
+                if index == selected_row:
+                    style = "reverse bold" if rows_focused and column == self.active_row_column else "bold"
+                row_lines.append(value, style=style)
+                if column < len(cells) - 1:
+                    row_lines.append(" ")
             row_lines.append("\n")
-        self.query_one("#rows-list", NavigatorList).update(row_lines)
+        rows_list.update(row_lines)
         if self.active_row_index is not None:
             self.query_one("#rows-scroll", VerticalScroll).scroll_to(
                 y=self.active_row_index, animate=False, force=True
