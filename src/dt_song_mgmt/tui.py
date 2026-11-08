@@ -314,6 +314,8 @@ class NavigatorList(Static):
     can_focus = True
 
     def _horizontal_target(self, event) -> bool:
+        if event.key in {"left", "right"} and self.id == "rows-list":
+            self.app._cancel_label_edit()
         if event.key == "left" and self.id == "rows-list":
             if self.app.active_row_column == 0:
                 self.app.query_one("#songs-list", NavigatorList).focus()
@@ -354,6 +356,9 @@ class ProjectBrowser(App[None]):
     TITLE = "Elektron Digi Song Mode Manager"
     SUB_TITLE = "Project browser"
     ROW_COLUMNS = ("pattern", "label", "repeat", "bpm", "length", "mutes")
+    ROW_LABEL_OPTIONS = [(0, "(none)"), (1, "Pattern name")] + [
+        (index, label) for index, label in enumerate(SONG_ROW_LABELS) if label
+    ]
     CSS = """
     Screen {
         layout: vertical;
@@ -488,6 +493,7 @@ class ProjectBrowser(App[None]):
         self.active_song_slot = 0
         self.active_row_index: int | None = None
         self.active_row_column = 0
+        self.editing_label_idx: int | None = None
         self.selected_row_indices: set[int] = set()
 
     def compose(self) -> ComposeResult:
@@ -517,6 +523,10 @@ class ProjectBrowser(App[None]):
 
     def on_key(self, event) -> None:
         """Handle song-list clipboard shortcuts only in the songs pane."""
+        if event.key == "escape" and self.editing_label_idx is not None:
+            event.stop()
+            self._cancel_label_edit()
+            return
         if event.key not in {"y", "p"} or self.session is None:
             return
         try:
@@ -707,6 +717,7 @@ class ProjectBrowser(App[None]):
         self.query_one("#project-tabs", Tabs).action_previous_tab()
 
     def action_switch_pane(self) -> None:
+        self._cancel_label_edit()
         songs_list = self.query_one("#songs-list", NavigatorList)
         rows_list = self.query_one("#rows-list", NavigatorList)
         (rows_list if self.focused is songs_list else songs_list).focus()
@@ -729,11 +740,16 @@ class ProjectBrowser(App[None]):
             elif field == "mutes":
                 self.action_toggle_mute()
             elif field == "label":
-                self.action_edit_label()
+                self._toggle_label_edit()
 
     def _move_cursor(self, delta: int | None = None, edge: str | None = None) -> None:
         songs_list = self.query_one("#songs-list", NavigatorList)
         rows_list = self.query_one("#rows-list", NavigatorList)
+        if self.focused is rows_list and self.editing_label_idx is not None:
+            if edge is None and delta in {-1, 1}:
+                self._cycle_label(delta)
+                return
+            self._cancel_label_edit()
         if self.focused is songs_list and self.songs:
             slots = [song["slot"] for song in self.songs]
             current = slots.index(self.active_song_slot) if self.active_song_slot in slots else 0
@@ -861,7 +877,10 @@ class ProjectBrowser(App[None]):
             row_lines.append(f"{marker}{check} {index + 1:02d} ")
             cells = (
                 ("pattern", f"{pattern_label(pattern_id):<3} {compact_name:<10}"),
-                ("label", f"{label:<5}"),
+                (
+                    "label",
+                    f"{self._label_name(self.editing_label_idx) if self.editing_label_idx is not None and index == selected_row else label:<5}",
+                ),
                 ("repeat", f"×{row['repeat']:<2}"),
                 ("bpm", f"{format_bpm(row['bpm_raw']):>7}"),
                 ("length", f"{format_length(row['length']):>4}"),
@@ -893,6 +912,11 @@ class ProjectBrowser(App[None]):
                 f"Row {self.active_row_index + 1:02d} · {pattern_label(pattern_id)} {pattern_name or '(unnamed)'}\n"
                 f"{(active_row.get('label') or '—')[:8]} · ×{active_row['repeat']} · "
                 f"{format_bpm(active_row['bpm_raw'])} BPM · {format_length(active_row['length'])} steps"
+            )
+        if self.editing_label_idx is not None:
+            detail = (
+                f"Choose row label · {self._label_name(self.editing_label_idx)}\n"
+                "↑/↓ select · Enter apply · Esc cancel"
             )
         self.query_one("#row-detail", Static).update(detail)
         if active_row is not None:
@@ -1176,54 +1200,55 @@ class ProjectBrowser(App[None]):
             return
         self._stage_row_update({"length": length}, f"Row length set to {length}; press s to save")
 
-    def action_edit_label(self) -> None:
+    def _toggle_label_edit(self) -> None:
         row = self._selected_row()
         if row is None:
             return
-        label_idx = row["label_idx"]
-        if label_idx == 0:
-            current = "(none)"
-        elif label_idx == 1:
-            current = "Pattern name"
-        elif label_idx < len(SONG_ROW_LABELS) and SONG_ROW_LABELS[label_idx]:
-            current = SONG_ROW_LABELS[label_idx]
-        else:
-            current = f"T{label_idx}"
-        choices = ["(none)", "Pattern name"] + [
-            label for label in SONG_ROW_LABELS if label
-        ]
-        self.push_screen(
-            EntryModal(
-                "Edit row label",
-                "Enter a label: " + ", ".join(choices),
-                "label",
-                current,
-            ),
-            self._on_label_choice,
-        )
-
-    def _on_label_choice(self, value: str | None) -> None:
-        if value is None:
+        if self.editing_label_idx is None:
+            self.editing_label_idx = row["label_idx"]
+            self._show_song(self.active_song_slot)
+            self._update_main_help()
             return
-        text = value.strip()
-        normalized = text.casefold()
-        if normalized in {"", "none", "(none)"}:
-            label_idx = 0
-        elif normalized in {"pattern", "pattern name"}:
-            label_idx = 1
+        label_idx = self.editing_label_idx
+        self.editing_label_idx = None
+        self._stage_row_update(
+            {"label_idx": label_idx},
+            f"Row label set to {self._label_name(label_idx)}; press s to save",
+        )
+        self._update_main_help()
+
+    @classmethod
+    def _label_name(cls, label_idx: int) -> str:
+        return next((label for index, label in cls.ROW_LABEL_OPTIONS if index == label_idx), f"T{label_idx}")
+
+    def _cycle_label(self, delta: int) -> None:
+        options = self.ROW_LABEL_OPTIONS
+        current = next(
+            (index for index, (label_idx, _) in enumerate(options) if label_idx == self.editing_label_idx),
+            0,
+        )
+        self.editing_label_idx = options[(current + delta) % len(options)][0]
+        self._show_song(self.active_song_slot)
+
+    def _cancel_label_edit(self) -> None:
+        if self.editing_label_idx is None:
+            return
+        self.editing_label_idx = None
+        if self.is_mounted and self.songs:
+            self._show_song(self.active_song_slot)
+            self._update_main_help()
+
+    def _update_main_help(self) -> None:
+        if not self.is_mounted:
+            return
+        if self.editing_label_idx is not None:
+            help_text = "LABEL · ↑↓ choose · Enter apply · Esc cancel\nSelect a label; changes remain draft until s"
         else:
-            label_idx = next(
-                (idx for idx, label in enumerate(SONG_ROW_LABELS) if label and label.casefold() == normalized),
-                None,
+            help_text = (
+                "↑↓ move rows · ←/→ move columns · Tab / ← at Pattern returns to songs · Enter edits cell\n"
+                "Songs Y/X/P bundle · Rows c/m/d · filled = playing · outline = muted · s save"
             )
-            if label_idx is None and re.fullmatch(r"t\d{1,3}", normalized):
-                label_idx = int(normalized[1:])
-                if label_idx > 255:
-                    label_idx = None
-            if label_idx is None:
-                self.notify("Choose one of the listed row labels", severity="error")
-                return
-        self._stage_row_update({"label_idx": label_idx}, f"Row label set to {text or '(none)'}; press s to save")
+        self.query_one("#message", Static).update(help_text)
 
     def action_toggle_mute(self) -> None:
         row = self._selected_row()
