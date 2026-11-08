@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import zipfile
 from pathlib import Path
 
 from .project import read_project, write_project, unpack_project, pack_project, payload_name, patch_project_name
@@ -18,7 +17,7 @@ def _samples_command(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(prog="dsm samples")
     commands = parser.add_subparsers(dest="command", required=True)
     export_parser = commands.add_parser("export", help="export sample paths, hierarchy, sizes, and hashes")
-    export_parser.add_argument("source", help="sample folder or Digitakt II .dt2prj archive")
+    export_parser.add_argument("source", help="Digitakt II .dt2prj project archive")
     export_parser.add_argument("--output", "-o", required=True, help="destination JSON inventory file")
     export_parser.add_argument("--label", help="friendly source label stored in the inventory")
     args = parser.parse_args(argv)
@@ -27,11 +26,12 @@ def _samples_command(argv: list[str]) -> None:
     destination = Path(args.output).expanduser().resolve()
     if source.is_file() and source == destination:
         parser.error("output must not replace the source project archive")
-    excluded = {destination, destination.with_suffix(destination.suffix + ".tmp")} if source.is_dir() else set()
+    if destination.exists() and destination.is_dir():
+        parser.error("output must be a JSON file path, not a directory")
     try:
-        inventory = export_inventory(source, label=args.label, exclude=excluded)
+        inventory = export_inventory(source, label=args.label)
         output_path = write_inventory(inventory, destination)
-    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+    except (OSError, ValueError) as exc:
         parser.error(str(exc))
     summary = inventory["summary"]
     print(
@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
         argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
         print("Elektron Digi Song Mode Manager (dsm)", file=sys.stderr)
-        print("Usage: dsm <project> [tui|info|rows|restore|web] ... | dsm samples export <folder-or-dt2prj> --output inventory.json | dsm launch | dsm stop", file=sys.stderr)
+        print("Usage: dsm <project> [tui|info|rows|restore|web] ... | dsm samples export <project.dt2prj> --output inventory.json | dsm launch | dsm stop", file=sys.stderr)
         raise SystemExit(0 if argv and argv[0] in ("-h", "--help") else 2)
 
     if argv[0] == "launch":

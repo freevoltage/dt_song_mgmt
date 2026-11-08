@@ -84,20 +84,14 @@ Press `F2` to open Pattern Manager. On Digitakt II projects, press `F3` to inspe
 
 ### Export sample library structure
 
-DSM exports metadata from a folder or Digitakt II project archive. The versioned JSON inventory records the folder hierarchy, paths, file sizes, and SHA-256 hashes. For `.dt2prj` manifests, Elektron sample hashes are preserved alongside SHA-256. Audio is streamed to calculate SHA-256; it is not extracted or stored in the inventory.
+DSM exports sample metadata from Digitakt II `.dt2prj` project archives only. It records the archive's sample folder hierarchy, paths, file sizes, SHA-256 hashes, and Elektron manifest hashes. Audio is streamed to calculate SHA-256; it is not extracted or stored in the inventory. DSM does not scan mounted devices or arbitrary folders.
 
 ```bash
-# Index a selected folder on a mounted Tonverk SD card
-dsm samples export "/Volumes/TONVERK/User/Samples" --label Tonverk --output tonverk-samples.json
-
-# Index a local Digitakt sample folder
-dsm samples export "/path/to/Digitakt/Samples" --label Digitakt --output digitakt-samples.json
-
-# Or index the sample members listed by one Digitakt II project
+# Export the sample structure embedded in a Digitakt II project
 dsm samples export "YEAR 2026 2.dt2prj" --output project-samples.json
 ```
 
-Project archives cover their `Samples/` members and manifest entries; they may not represent the full Digitakt +Drive library. Choose only the folders you want inventoried. The export is read-only and does not compare libraries, move files, or update device references.
+The export covers that project's `Samples/` members and manifest entries; it does not represent samples outside the project archive. It is read-only and does not compare libraries, move files, or update device references.
 
 ### macOS launcher
 
