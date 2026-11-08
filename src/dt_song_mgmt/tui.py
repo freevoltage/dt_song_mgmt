@@ -394,7 +394,7 @@ class ProjectBrowser(App[None]):
     #rows-columns { height: 1; color: $text-muted; }
     #row-detail { height: 2; color: $text-muted; }
     #song-detail { height: 1; color: $text-muted; }
-    #mute-display { height: 2; padding: 0 2; border-top: solid $panel; }
+    #mute-display { height: 3; padding: 0 2; border-top: solid $panel; }
     .pane-title.focused { color: $text; text-style: bold reverse; }
     .navigator-list:focus { color: $text; }
     #message {
