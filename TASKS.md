@@ -4,11 +4,11 @@
 
 **Status:** Open; current project-archive export is not sufficient
 
-Export paths, directory hierarchy, sizes, and hashes for the full user sample library on the Digitakt II +Drive. The JSON is consumed by the user's separate library-management app. DSM only reads the Digitakt; it must not copy persistent audio files or perform any synchronization.
+Export paths, directory hierarchy, sizes, and hashes for the entire sample library on the Digitakt II +Drive, including user and factory folders. The JSON is consumed by the user's separate library-management app. DSM only reads the Digitakt; it must not copy persistent audio files or perform any synchronization.
 
 ### Acceptance criteria
 
-- Inventory all user sample directories/files on the Digitakt +Drive, including items unused by the current project.
+- Inventory all sample directories/files on the Digitakt +Drive, including factory folders and items unused by the current project.
 - Preserve full relative paths and available file sizes and device hashes.
 - Do not persist or extract audio files.
 - Report missing/unavailable metadata clearly.
@@ -17,8 +17,8 @@ Export paths, directory hierarchy, sizes, and hashes for the full user sample li
 
 ### Feasibility gate
 
-Validate Elektroid's read-only CLI against the connected Digitakt II. It documents sample directory listings with file sizes and an internal checksum, and supports Digitakt II. Check that the installed build exposes the device's sample filesystem, walk nested directories, and determine whether its checksum is suitable as the export hash. If SHA-256 must be computed from content, every sample byte must be read; streaming avoids saving a second copy but does not avoid reading/transferring those bytes. Confirm whether factory sample paths are exposed too.
+Elektroid 3.3.2's GUI has connected to the attached Digitakt II (OS 1.16) and browsed the root, nested user folders, sample names/sizes, and `/factory` subfolders. No transfers or device changes were made. This confirms the full hierarchy, including factory folders, is visible. Elektroid's documentation says the CLI sample listing also returns an internal checksum. Still verify the recursive CLI output and checksum on this device. If SHA-256 must be computed from content, every sample byte must be read; streaming avoids saving a second copy but does not avoid reading/transferring those bytes.
 
 The existing `.dt2prj` export only describes samples included in that project. It is not a full +Drive inventory.
 
-Elektroid 3.3.2 is installed on the development Mac. Its first live CLI probe could not initialize a MIDI client while Elektron Transfer was connected, so repeat the read-only probe after Transfer releases the device.
+Elektroid 3.3.2 is installed on the development Mac. The CLI probe fails to initialize its macOS MIDI client even while Transfer is disconnected, although the Elektroid GUI connects. Investigate this CLI issue before implementing the exporter.
