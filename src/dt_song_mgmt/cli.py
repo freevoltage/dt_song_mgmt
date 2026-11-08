@@ -2,13 +2,42 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
+import zipfile
 from pathlib import Path
 
 from .project import read_project, write_project, unpack_project, pack_project, payload_name, patch_project_name
 from .songs import get_song_slots, song_name, collect_pattern_names, get_song_info, get_all_songs_info
 from .web.server import run_web_server
 from . import dump_songs, restore_songs
+from .sample_inventory import export_inventory, write_inventory
+
+
+def _samples_command(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(prog="dsm samples")
+    commands = parser.add_subparsers(dest="command", required=True)
+    export_parser = commands.add_parser("export", help="export sample paths, hierarchy, sizes, and hashes")
+    export_parser.add_argument("source", help="sample folder or Digitakt II .dt2prj archive")
+    export_parser.add_argument("--output", "-o", required=True, help="destination JSON inventory file")
+    export_parser.add_argument("--label", help="friendly source label stored in the inventory")
+    args = parser.parse_args(argv)
+
+    source = Path(args.source).expanduser().resolve()
+    destination = Path(args.output).expanduser().resolve()
+    if source.is_file() and source == destination:
+        parser.error("output must not replace the source project archive")
+    excluded = {destination, destination.with_suffix(destination.suffix + ".tmp")} if source.is_dir() else set()
+    try:
+        inventory = export_inventory(source, label=args.label, exclude=excluded)
+        output_path = write_inventory(inventory, destination)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        parser.error(str(exc))
+    summary = inventory["summary"]
+    print(
+        f"Exported {summary['hashed_file_count']}/{summary['file_count']} files "
+        f"with hashes and {summary['error_count']} errors to {output_path}"
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -16,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
         argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
         print("Elektron Digi Song Mode Manager (dsm)", file=sys.stderr)
-        print("Usage: dsm <project> [tui|info|rows|restore|web] ... | dsm launch | dsm stop", file=sys.stderr)
+        print("Usage: dsm <project> [tui|info|rows|restore|web] ... | dsm samples export <folder-or-dt2prj> --output inventory.json | dsm launch | dsm stop", file=sys.stderr)
         raise SystemExit(0 if argv and argv[0] in ("-h", "--help") else 2)
 
     if argv[0] == "launch":
@@ -27,6 +56,9 @@ def main(argv: list[str] | None = None) -> None:
         from .launcher import stop_servers
         stopped = stop_servers()
         print(f"Stopped {stopped} DSM server{'s' if stopped != 1 else ''} launched by the app.")
+        return
+    if argv[0] == "samples":
+        _samples_command(argv[1:])
         return
 
     prj = Path(argv[0]).expanduser().resolve()

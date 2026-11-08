@@ -1,49 +1,45 @@
-# Plan: shared Digitakt II and Tonverk sample inventory
+# Plan: sample structure export
 
 ## Goal
 
-Export the folder hierarchy and metadata for the shared sample library so the Digitakt II and Tonverk libraries can be compared without copying audio into the export. Keep the first version read-only. It can report a Tonverk path change, but it must not move files or rewrite project references.
+Export a machine-readable hierarchy of sample-library files for use in another app. DSM only indexes and exports metadata. It does not compare libraries, synchronize them, move files, or update device/project references.
 
-## Proposed scope
+## Input sources
 
-- Scan local folders recursively, including a Tonverk SD card mounted through USB Disk Mode.
-- Read `.dt2prj` archives as another Digitakt source. Use their manifests for Elektron hashes and paths, and stream sample contents to compute SHA-256 when cross-device matching needs a common hash.
-- Include every file under the selected roots, not only WAV files. Record folders as hierarchy and record each file's relative path, filename, extension, byte size, SHA-256, and any available Elektron hash.
-- Export a versioned JSON inventory. Add CSV output if the hierarchy can be represented clearly without losing path information.
-- Compare two inventories by SHA-256. Report files present on both devices, files found on only one, identical files at different paths, and same-path files with different content.
-- Stream file contents for hashing; do not store audio data in the inventory or create an extracted copy of an archive.
-- Keep scanning and comparison read-only. Do not sync, rename, delete, or move files in the first version.
+- Local folders recursively, including selected folders on a Tonverk SD card mounted through USB Disk Mode.
+- Digitakt II `.dt2prj` archives, indexing their manifest sample entries and streaming archive members for content hashes.
+
+For a `.dt2prj`, the manifest describes samples included in that project and may not represent the entire device +Drive. A local Digitakt library folder is needed for a complete device-library inventory.
+
+## Export format
+
+Use versioned JSON as the canonical format. Include a source label, export timestamp, source kind, explicit directory entries (including empty directories), file entries, and scan errors. Each file entry includes its root-relative POSIX path, name, extension, size, SHA-256, and optional Elektron hash and manifest size. Do not include absolute source paths by default.
+
+Hash folder files and ZIP members in chunks. Never extract archive members or retain audio bytes. Do not follow symlinks outside the selected root; record symlinks and their target as metadata without treating their target contents as indexed files. Exclude the output file if it is inside the scanned folder.
 
 ## Implementation steps
 
-1. **Confirm inventory inputs and output schema.** Define source labels, relative-path rules, hash fields, duplicate-file handling, and which root directories to scan.
-2. **Build a streaming inventory backend.** Add a folder scanner and a `.dt2prj` reader. The reader should stream archive members rather than load every sample into memory. Preserve Elektron's hash separately from SHA-256.
-3. **Add CLI commands.** Suggested shape: `dsm samples index <root> --output library.json` and `dsm samples compare <digitakt.json> <tonverk.json>`. Keep inventory generation independent of opening a song project in the TUI.
-4. **Add comparison output.** Show same-content samples, missing samples, path changes, and content changes at the same path. Keep stable machine-readable JSON output for future TUI use.
-5. **Validate with local data.** Use the existing Digitakt project/archive and a representative folder copy. Check duplicate filenames, nested folders, non-audio files, unreadable files, and identical content with different names.
-6. **Validate with Tonverk storage.** Scan a mounted Tonverk SD card and check that the exported hierarchy matches what the device displays. Do not change device files during this phase.
-7. **Consider a TUI view later.** Once the inventory and comparison are reliable, add a screen to browse differences and export reports. Any future sync action needs its own plan because Tonverk references may not follow moved files.
+1. Add `sample_inventory.py` with folder and `.dt2prj` inventory functions and a stable JSON schema.
+2. Add a CLI export command, for example: `dsm samples export <folder-or-dt2prj> --output library.json [--label Tonverk]`.
+3. Report read errors, invalid manifest entries, missing archive members, and files that change during hashing. Keep all records that can be read.
+4. Document use with two selected library roots and explain that no audio is copied, but bytes are streamed to calculate SHA-256.
+5. Check the exporter with local fixtures and inspect its output for hierarchy, empty directories, duplicate names, manifest Elektron hashes, and missing members.
+6. When available, scan a mounted Tonverk SD card and confirm the exported relative paths match the device's folder structure. Do not alter its files.
 
-## What I need from you
+## What the user can provide
 
-I can implement the scanner, JSON schema, CLI, and comparison using local folders and the Digitakt project already in the workspace. For hardware-specific validation, please make these available when convenient:
+Implementation can begin with the Digitakt project archive and any local folder. Hardware-specific validation needs:
 
-- A Tonverk SD card mounted on the computer, or a representative copy of its sample folders that preserves the folder structure.
-- The Digitakt sample-library folder you currently synchronize, or confirmation that the existing `.dt2prj` archive is the Digitakt input you want indexed.
-- Whether to scan the entire Tonverk SD card or only selected sample-library folders. **Recommended:** select the sample folders and leave system folders out.
+- A Tonverk SD card mounted on the computer, or a representative copy of its sample folders that preserves directory structure.
+- The local Digitakt sample-library folder used by the existing workflow, if that should be indexed as the device library rather than only indexing project archives.
+- The selected sample roots to include. Recommended: choose sample folders, not system folders across the entire Tonverk card.
 
-No audio upload or duplicate audio copy is needed. The scanner must read file bytes to compute SHA-256 if no shared hash is already available; it can do that sequentially and discard the bytes immediately.
-
-## Feasibility and limits
-
-This is feasible as a metadata-only inventory. Tonverk's manual documents its SD-card folder browser and USB Disk Mode, which provides a practical way to scan its hierarchy while mounted. A hash identifies identical file contents even when folder paths differ. The inventory can reveal path changes, but it cannot repair Tonverk references without modifying device/project data.
-
-Digitakt project manifests contain project sample entries, but a project archive may not describe every sample on the device's +Drive. Scanning a mounted or copied Digitakt library folder gives a fuller inventory when that source is available.
+No audio upload or duplicate copy is needed. SHA-256 requires reading each file once when no shared digest exists; the implementation can stream and discard the bytes.
 
 ## Completion criteria
 
-- JSON inventory preserves the selected folder hierarchy and records every file's relative path, size, and SHA-256.
-- Digitakt manifest Elektron hashes are preserved as separate metadata when available.
+- JSON preserves selected directory hierarchy and records every readable file's root-relative path, size, and SHA-256.
+- `.dt2prj` sample paths and Elektron hashes are retained, while SHA-256 is computed from the matching archive member.
+- Output reports missing or unreadable source members and scan errors.
 - Inventory generation does not extract or save audio files and does not modify source data.
-- Comparison correctly identifies identical content across different paths and reports missing or changed files.
-- The user can review/export a report without applying any file moves.
+- Output is suitable for another app to consume; DSM contains no library comparison or synchronization actions.
