@@ -207,12 +207,12 @@ class PatternManagerScreen(ModalScreen[None]):
             self.app.notify(str(exc), severity="error", timeout=8)
 
     def _clipboard(self) -> dict | None:
-        value = getattr(self.clipboard_owner, "clipboard", None)
+        value = getattr(self.clipboard_owner, "_dsm_clipboard", None)
         return value if value and value.get("kind") == "pattern" else None
 
     def _set_clipboard(self, value: dict | None) -> None:
         if self.clipboard_owner is not None:
-            self.clipboard_owner.clipboard = value
+            self.clipboard_owner._dsm_clipboard = value
 
     def action_yank_pattern(self) -> None:
         self._set_clipboard({

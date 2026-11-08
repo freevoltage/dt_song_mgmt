@@ -308,7 +308,7 @@ class ProjectBrowser(App[None]):
         self.session: ProjectSession | None = None
         self.sessions: list[ProjectSession] = []
         self._tab_sessions: dict[str, ProjectSession] = {}
-        self.clipboard: dict | None = None
+        self._dsm_clipboard: dict | None = None
         self._active_tab_id = "project-0"
         self.active_song_slot = 0
         self.active_row_index: int | None = None
@@ -343,7 +343,7 @@ class ProjectBrowser(App[None]):
         self._set_song_clipboard("copy")
 
     def _set_song_clipboard(self, mode: str) -> None:
-        self.clipboard = {
+        self._dsm_clipboard = {
             "kind": "song",
             "mode": mode,
             "session": self.session,
@@ -383,7 +383,7 @@ class ProjectBrowser(App[None]):
         return result
 
     def _paste_song_clipboard(self) -> None:
-        clipboard = self.clipboard
+        clipboard = self._dsm_clipboard
         if not clipboard or clipboard.get("kind") != "song":
             self.notify("Song clipboard is empty", severity="warning")
             return
@@ -448,7 +448,7 @@ class ProjectBrowser(App[None]):
             self.notify(f"Could not paste song bundle: {exc}", severity="error", timeout=10)
             return
         if clipboard["mode"] == "cut":
-            self.clipboard = None
+            self._dsm_clipboard = None
             self.notify(
                 f"Moved song {source_slot:02d} to slot {destination_slot:02d}; both project drafts are staged. Press s to save each project."
             )
