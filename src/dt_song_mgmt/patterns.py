@@ -5,15 +5,22 @@ from .songs import get_song_rows, get_song_slots, pattern_label, retarget_rows, 
 
 
 def get_all_patterns_info(raw: bytes) -> list[dict]:
-    from .songs import pattern_name_at, collect_pattern_names
+    from .songs import collect_pattern_names, song_name
     pattern_names = collect_pattern_names(raw)
     slots = get_song_slots(raw)
-    # count refs
     ref_counts = [0] * PATTERN_SLOTS
-    for s in slots:
-        for r in get_song_rows(s):
-            if 0 <= r[0] < PATTERN_SLOTS:
-                ref_counts[r[0]] += 1
+    references: list[list[dict]] = [[] for _ in range(PATTERN_SLOTS)]
+    for song_slot, song_record in enumerate(slots):
+        name = song_name(song_record)
+        for row_index, row in enumerate(get_song_rows(song_record)):
+            pattern_index = row[0]
+            if 0 <= pattern_index < PATTERN_SLOTS:
+                ref_counts[pattern_index] += 1
+                references[pattern_index].append({
+                    "song_slot": song_slot,
+                    "song_name": name,
+                    "row": row_index + 1,
+                })
     patterns = []
     for i in range(PATTERN_SLOTS):
         name = pattern_names[i]
@@ -23,6 +30,7 @@ def get_all_patterns_info(raw: bytes) -> list[dict]:
             "name": name,
             "has_custom_name": bool(name.strip()),
             "ref_count": ref_counts[i],
+            "references": references[i],
         })
     return patterns
 
