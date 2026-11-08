@@ -69,6 +69,40 @@ class EntryModal(ModalScreen[str | None]):
             self.dismiss(None)
 
 
+class RowFieldModal(ModalScreen[str | None]):
+    """Choose which field of the selected song row to edit."""
+
+    CSS = """
+    RowFieldModal { align: center middle; background: #000000 70%; }
+    #row-field-dialog { width: 42; height: auto; padding: 1 2; border: solid #c18a3c; background: #111111; }
+    #row-field-dialog Button { width: 1fr; margin: 0 0 1 0; border: none; background: #222222; color: #dedbd2; }
+    """
+
+    FIELDS = (
+        ("pattern", "Pattern"),
+        ("repeat", "Repeat count"),
+        ("bpm", "Tempo (BPM)"),
+        ("length", "Row length"),
+        ("mutes", "Track mutes"),
+    )
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="row-field-dialog"):
+            yield Label("Edit song row")
+            for field, label in self.FIELDS:
+                yield Button(label, id=f"field-{field}")
+
+    def on_mount(self) -> None:
+        self.query_one("#field-pattern", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id.removeprefix("field-"))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class SongPatternMappingModal(ModalScreen[list[dict] | None]):
     """Edit a song bundle's source-to-destination pattern slot mapping."""
 
@@ -313,6 +347,14 @@ class NavigatorList(Static):
     can_focus = True
 
     def on_key(self, event) -> None:
+        if event.key == "left" and self.id == "rows-list":
+            event.stop()
+            self.app.query_one("#songs-list", NavigatorList).focus()
+            return
+        if event.key == "right" and self.id == "songs-list":
+            event.stop()
+            self.app.query_one("#rows-list", NavigatorList).focus()
+            return
         action = {
             "up": "action_move_cursor_up",
             "down": "action_move_cursor_down",
@@ -413,19 +455,14 @@ class ProjectBrowser(App[None]):
         ("q", "quit", "Quit"),
         ("escape", "quit", "Quit"),
         ("tab", "switch_pane", "Switch pane"),
-        ("enter", "focus_song_rows", "Open song rows"),
+        ("enter", "focus_song_rows", "Open / edit row"),
         ("space", "toggle_row_selection", "Select row"),
-        ("p", "change_pattern", "Set row pattern"),
         ("d", "delete_row", "Delete row"),
         ("alt+up", "move_row_up", "Move row up"),
         ("alt+down", "move_row_down", "Move row down"),
         ("c", "copy_row", "Copy row"),
         ("m", "move_row", "Move row"),
-        ("r", "edit_repeat", "Edit repeat"),
-        ("b", "edit_bpm", "Edit BPM"),
-        ("l", "edit_length", "Edit length"),
-        ("t", "toggle_mute", "Toggle track mute"),
-        ("n", "rename_song", "Rename song"),
+        ("r", "rename_song", "Rename song"),
         ("w", "swap_song", "Swap song slots"),
         ("k", "clear_song", "Clear song rows"),
         ("e", "empty_song", "Empty song slot"),
@@ -490,15 +527,15 @@ class ProjectBrowser(App[None]):
                 yield Static("", id="row-detail")
         yield Static("", id="mute-display")
         yield Static(
-            "↑↓ move · Tab panes · Enter rows · Space mark · Alt+↑↓ reorder\n"
-            "Songs Y/X/P bundle · Rows p/x/c/m/d · filled = playing · outline = muted · s save",
+            "↑↓ move · ← songs / rows → · Tab panes · Enter rows/edit · Space mark · Alt+↑↓ reorder\n"
+            "Songs Y/X/P bundle · Rows Enter edit, c/m/d · filled = playing · outline = muted · s save",
             id="message",
         )
         yield Footer()
 
     def on_key(self, event) -> None:
-        """Use y for song bundles only while the song list is focused."""
-        if event.key != "y" or self.session is None:
+        """Handle song-list clipboard shortcuts only in the songs pane."""
+        if event.key not in {"y", "p"} or self.session is None:
             return
         try:
             songs_list = self.query_one("#songs-list", NavigatorList)
@@ -507,7 +544,10 @@ class ProjectBrowser(App[None]):
         if self.focused is not songs_list:
             return
         event.stop()
-        self._set_song_clipboard("copy")
+        if event.key == "y":
+            self._set_song_clipboard("copy")
+        else:
+            self._paste_song_clipboard()
 
     def _set_song_clipboard(self, mode: str) -> None:
         self._dsm_clipboard = {
@@ -692,6 +732,24 @@ class ProjectBrowser(App[None]):
     def action_focus_song_rows(self) -> None:
         if self.focused is self.query_one("#songs-list", NavigatorList):
             self.query_one("#rows-list", NavigatorList).focus()
+        elif self.focused is self.query_one("#rows-list", NavigatorList):
+            if self._selected_row() is None:
+                return
+            self.push_screen(RowFieldModal(), self._on_row_field_selected)
+
+    def _on_row_field_selected(self, field: str | None) -> None:
+        if field is None:
+            return
+        if field == "pattern":
+            self.action_change_pattern()
+        elif field == "repeat":
+            self.action_edit_repeat()
+        elif field == "bpm":
+            self.action_edit_bpm()
+        elif field == "length":
+            self.action_edit_length()
+        elif field == "mutes":
+            self.action_toggle_mute()
 
     def _move_cursor(self, delta: int | None = None, edge: str | None = None) -> None:
         songs_list = self.query_one("#songs-list", NavigatorList)
