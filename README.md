@@ -82,17 +82,6 @@ Use `Ctrl+O` to open another project in a workspace tab. `Ctrl+Tab` and `Ctrl+Sh
 
 Press `F2` to open Pattern Manager. On Digitakt II projects, press `F3` to inspect per-pattern sample reference sizes, including kit sounds and sample locks, and samples shared across patterns. Pool-only samples without archive WAV files are shown by pool slot and hash. These are reference totals from each pattern, not a prediction of RAM freed by removing a pattern. Press `F4` to see which patterns each song uses and how many rows reference each one. Keys `1`–`8` filter to banks A–H, and `0` shows all banks. Pressing one of those numbers from the main view opens Pattern Manager filtered to that bank. Use `/` to search, then copy (`c`), move (`m`), clear (`d`), rename (`r`), or import (`i`) a pattern from another open tab or project path. In Pattern Manager, `y` copies the selected pattern, `x` cuts it, and `p` pastes it into the selected slot; these clipboard actions work across open tabs. A cross-project cut is blocked when the source pattern is still used by a song. Press `x` from the song-slot table to cut a song bundle; from the row table, `x` exports the selected song as a `.bin`. Use `v` to stage a `.bin` restore, or `g` to import a song slot without patterns. `Ctrl+E` exports a full project JSON snapshot; `Ctrl+I` stages a full snapshot or older arrangement-only JSON restore. The latter warns that it contains no patterns and keeps the current project's patterns. Imported or restored data stays in the draft until you press `s` to save.
 
-### Export sample metadata from a project archive
-
-DSM exports sample metadata from Digitakt II `.dt2prj` project archives only. It records the archive's sample folder hierarchy, paths, file sizes, SHA-256 hashes, and Elektron manifest hashes. Audio is streamed to calculate SHA-256; it is not extracted or stored in the inventory. DSM does not scan mounted devices or arbitrary folders.
-
-```bash
-# Export the sample structure embedded in a Digitakt II project
-dsm samples export "YEAR 2026 2.dt2prj" --output project-samples.json
-```
-
-The export covers that project's `Samples/` members and manifest entries; it does not represent samples outside the project archive. It is read-only and does not compare libraries, move files, or update device references.
-
 ### macOS launcher
 
 Open `macos/DSM Launcher.app` from Finder to choose a project and open it in the browser without leaving a Terminal window running. Open the launcher again to start another project in its own browser window. Choose **Stop app-launched servers** from the launcher menu when you are finished.

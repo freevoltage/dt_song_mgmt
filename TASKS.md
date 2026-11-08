@@ -4,4 +4,4 @@
 
 The full +Drive sample path inventory belongs in Elektroid, which can browse the Digitakt II's user and factory sample folders. DSM will not implement a full-device library export or sample-library synchronization.
 
-DSM may continue to report sample references used by patterns in an opened Digitakt II project. The existing `dsm samples export <project.dt2prj>` command is project-archive-only and does not represent the full +Drive library.
+DSM may continue to report sample references used by patterns in an opened Digitakt II project.
