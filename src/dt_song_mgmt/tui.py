@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Input, Label, Static, Tab, Tabs
 
@@ -66,6 +66,131 @@ class EntryModal(ModalScreen[str | None]):
             self.dismiss(self.query_one("#entry-input", Input).value)
         else:
             self.dismiss(None)
+
+
+class SongPatternMappingModal(ModalScreen[list[dict] | None]):
+    """Edit a song bundle's source-to-destination pattern slot mapping."""
+
+    CSS = """
+    SongPatternMappingModal { align: center middle; background: $background 60%; }
+    #song-pattern-map-dialog { width: 96%; height: 90%; padding: 1 2; border: solid $primary; background: $surface; }
+    #mapping-context { height: 2; }
+    #mapping-columns { height: 1; text-style: bold; }
+    #mapping-rows { height: 1fr; }
+    .mapping-row { height: 1; }
+    .mapping-source { width: 28; }
+    .mapping-arrow { width: 4; text-align: center; }
+    .mapping-destination { width: 12; height: 1; border: none; }
+    .mapping-current { width: 1fr; }
+    #mapping-note { height: 2; }
+    #mapping-error { height: 1; color: $error; }
+    #mapping-buttons { height: 3; align-horizontal: right; }
+    #mapping-buttons Button { margin-left: 1; }
+    """
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(
+        self,
+        source_patterns: set[int],
+        source_pattern_names: list[str],
+        destination_pattern_names: list[str],
+        source_project: str,
+        source_song: int,
+        destination_project: str,
+        destination_song: int,
+    ):
+        super().__init__()
+        self.source_patterns = sorted(source_patterns)
+        self.source_pattern_names = source_pattern_names
+        self.destination_pattern_names = destination_pattern_names
+        self.source_project = source_project
+        self.source_song = source_song
+        self.destination_project = destination_project
+        self.destination_song = destination_song
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="song-pattern-map-dialog"):
+            yield Label("Map song patterns")
+            yield Static(
+                f"FROM  {self.source_project} · song {self.source_song:02d}\n"
+                f"TO      {self.destination_project} · song {self.destination_song:02d}",
+                id="mapping-context",
+            )
+            yield Static("SOURCE SLOT / PATTERN      →      DESTINATION SLOT / CURRENT NAME", id="mapping-columns")
+            with VerticalScroll(id="mapping-rows"):
+                for source in self.source_patterns:
+                    source_name = self.source_pattern_names[source].strip() or "(unnamed)"
+                    destination_name = self.destination_pattern_names[source].strip() or "(unnamed)"
+                    with Horizontal(classes="mapping-row"):
+                        yield Static(
+                            f"{pattern_label(source)}  {source_name}",
+                            classes="mapping-source",
+                        )
+                        yield Static("→", classes="mapping-arrow")
+                        yield Input(
+                            value=pattern_label(source),
+                            placeholder="A01–H16",
+                            id=f"mapping-destination-{source}",
+                            classes="mapping-destination",
+                        )
+                        yield Static(destination_name, id=f"mapping-current-{source}", classes="mapping-current")
+            yield Static(
+                "Destinations default to the source slots. Each destination pattern will be replaced.",
+                id="mapping-note",
+            )
+            yield Static("", id="mapping-error")
+            with Horizontal(id="mapping-buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Apply mapping", id="apply", variant="primary")
+
+    def on_mount(self) -> None:
+        if self.source_patterns:
+            self.query_one(f"#mapping-destination-{self.source_patterns[0]}", Input).focus()
+
+    @staticmethod
+    def _parse_destination(value: str) -> int:
+        match = re.fullmatch(r"\s*([A-Ha-h])\s*(\d{1,2})\s*", value)
+        if not match or not 1 <= int(match.group(2)) <= 16:
+            raise ValueError(f"Invalid destination slot: {value.strip() or '(empty)'}")
+        return (ord(match.group(1).upper()) - ord("A")) * 16 + int(match.group(2)) - 1
+
+    def _apply_mapping(self) -> None:
+        mappings = []
+        try:
+            for source in self.source_patterns:
+                value = self.query_one(f"#mapping-destination-{source}", Input).value
+                mappings.append({"src_idx": source, "dst_idx": self._parse_destination(value)})
+            destinations = [item["dst_idx"] for item in mappings]
+            if len(destinations) != len(set(destinations)):
+                raise ValueError("Each source pattern needs a unique destination slot")
+        except ValueError as exc:
+            self.query_one("#mapping-error", Static).update(str(exc))
+            return
+        self.dismiss(mappings)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._apply_mapping()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if not event.input.id.startswith("mapping-destination-"):
+            return
+        source = int(event.input.id.rsplit("-", 1)[1])
+        try:
+            destination = self._parse_destination(event.value)
+            name = self.destination_pattern_names[destination].strip() or "(unnamed)"
+        except (ValueError, IndexError):
+            name = "(choose A01–H16)"
+        self.query_one(f"#mapping-current-{source}", Static).update(name)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "apply":
+            self._apply_mapping()
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ConfirmModal(ModalScreen[bool]):
@@ -373,33 +498,6 @@ class ProjectBrowser(App[None]):
             "focus a destination song slot and press p"
         )
 
-    @staticmethod
-    def _parse_pattern_mapping(value: str, source_patterns: set[int]) -> list[dict]:
-        def parse_slot(token: str) -> int:
-            match = re.fullmatch(r"\s*([A-Ha-h])\s*(\d{1,2})\s*", token)
-            if not match:
-                raise ValueError(f"invalid pattern slot: {token.strip()}")
-            number = int(match.group(2))
-            if not 1 <= number <= 16:
-                raise ValueError(f"pattern number must be between 1 and 16: {token.strip()}")
-            return (ord(match.group(1).upper()) - ord("A")) * 16 + number - 1
-
-        result = []
-        for part in value.split(","):
-            if not part.strip():
-                continue
-            pieces = part.split("=", 1)
-            if len(pieces) != 2:
-                raise ValueError("use source=destination pairs, separated by commas")
-            result.append({"src_idx": parse_slot(pieces[0]), "dst_idx": parse_slot(pieces[1])})
-        sources = [item["src_idx"] for item in result]
-        if len(sources) != len(set(sources)) or set(sources) != source_patterns:
-            raise ValueError("map every source pattern exactly once")
-        destinations = [item["dst_idx"] for item in result]
-        if len(destinations) != len(set(destinations)):
-            raise ValueError("each pattern needs a unique destination slot")
-        return result
-
     def _paste_song_clipboard(self) -> None:
         clipboard = self._dsm_clipboard
         if not clipboard or clipboard.get("kind") != "song":
@@ -416,34 +514,34 @@ class ProjectBrowser(App[None]):
         if not source_patterns:
             self.notify("This song has no rows or referenced patterns to paste", severity="warning")
             return
-        defaults = ", ".join(f"{pattern_label(index)}={pattern_label(index)}" for index in sorted(source_patterns))
         self.push_screen(
-            EntryModal(
-                "Map song patterns",
-                "Choose a destination slot for each source pattern. Mapped destination patterns will be replaced.",
-                "A01=A01, B04=C02",
-                defaults,
+            SongPatternMappingModal(
+                source_patterns,
+                collect_pattern_names(source_raw),
+                collect_pattern_names(self.session.working_raw()),
+                source_session.path.name,
+                source_slot,
+                self.session.path.name,
+                destination_slot,
             ),
             lambda value: self._on_song_bundle_mapping(
-                value, clipboard, source_raw, source_patterns, destination_slot
+                value, clipboard, source_raw, destination_slot
             ),
         )
 
     def _on_song_bundle_mapping(
         self,
-        value: str | None,
+        mappings: list[dict] | None,
         clipboard: dict,
         source_raw: bytes,
-        source_patterns: set[int],
         destination_slot: int,
     ) -> None:
-        if value is None:
+        if mappings is None:
             return
         source_session = clipboard["session"]
         source_slot = int(clipboard["slot"])
         destination_staged = False
         try:
-            mappings = self._parse_pattern_mapping(value, source_patterns)
             source_members = source_session.working_members()
             source_manifest = json.loads(
                 next(data for info, data in source_members if info.filename == "manifest.json")
