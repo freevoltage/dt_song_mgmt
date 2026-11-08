@@ -394,6 +394,7 @@ class ProjectBrowser(App[None]):
     #rows-columns { height: 1; color: $text-muted; }
     #row-detail { height: 2; color: $text-muted; }
     #song-detail { height: 1; color: $text-muted; }
+    #mute-display { height: 2; padding: 0 2; border-top: solid $panel; }
     .pane-title.focused { color: $text; text-style: bold reverse; }
     .navigator-list:focus { color: $text; }
     #message {
@@ -483,13 +484,14 @@ class ProjectBrowser(App[None]):
                 yield Static("", id="song-detail")
             with Vertical(id="rows-pane"):
                 yield Static("SONG ROWS", id="rows-title", classes="pane-title")
-                yield Static(" #  PATTERN/NAME   LABEL  REP BPM LEN MUTE", id="rows-columns")
+                yield Static(" #  PATTERN/NAME   LABEL  REP BPM LEN", id="rows-columns")
                 with VerticalScroll(id="rows-scroll"):
                     yield NavigatorList("", id="rows-list", classes="navigator-list")
                 yield Static("", id="row-detail")
+        yield Static("", id="mute-display")
         yield Static(
             "↑↓ move · Tab panes · Enter rows · Space mark · Alt+↑↓ reorder\n"
-            "Songs Y/X/P bundle · Rows p/x/c/m/d · s save · F2 patterns · F4 usage",
+            "Songs Y/X/P bundle · Rows p/x/c/m/d · filled = playing · outline = muted · s save",
             id="message",
         )
         yield Footer()
@@ -812,17 +814,15 @@ class ProjectBrowser(App[None]):
         for index, row in enumerate(song["rows"]):
             pattern_id = row["pattern"]
             custom_name = self.pattern_names[pattern_id] if 0 <= pattern_id < len(self.pattern_names) else ""
-            muted = [f"T{track}" for track in range(1, 17) if row["mute"] & (1 << (track - 1))]
             marker = ">" if index == selected_row else " "
             check = "✓" if index in self.selected_row_indices else " "
             compact_name = (custom_name.strip() or "(unnamed)")[:10]
             label = (row.get("label") or "—")[:5]
-            mute_count = f"{len(muted)}m" if muted else "—"
             line = (
                 f"{marker}{check} {index + 1:02d} {pattern_label(pattern_id):<3} "
                 f"{compact_name:<10} {label:<5} "
                 f"×{row['repeat']:<2} {format_bpm(row['bpm_raw']):>4} "
-                f"{format_length(row['length']):>4} {mute_count:>3}"
+                f"{format_length(row['length']):>4}"
             )
             row_lines.append(line, style="reverse bold" if marker == ">" else None)
             row_lines.append("\n")
@@ -835,15 +835,26 @@ class ProjectBrowser(App[None]):
             active_row = song["rows"][self.active_row_index]
         if active_row is None:
             detail = "Select a row to see its full pattern name and muted tracks."
+            mute_display = Text("MUTES  White tile = playing · outline tile = muted\n")
+            mute_display.append("Select a song row to show tracks 1–16.")
         else:
             pattern_id = active_row["pattern"]
             pattern_name = self.pattern_names[pattern_id].strip() if 0 <= pattern_id < len(self.pattern_names) else ""
-            muted_tracks = [f"T{track}" for track in range(1, 17) if active_row["mute"] & (1 << (track - 1))]
             detail = (
-                f"Row {self.active_row_index + 1:02d} · {pattern_label(pattern_id)} {pattern_name or '(unnamed)'} · "
-                f"Muted: {', '.join(muted_tracks) if muted_tracks else 'none'}"
+                f"Row {self.active_row_index + 1:02d} · {pattern_label(pattern_id)} {pattern_name or '(unnamed)'}\n"
+                f"{(active_row.get('label') or '—')[:8]} · ×{active_row['repeat']} · "
+                f"{format_bpm(active_row['bpm_raw'])} BPM · {format_length(active_row['length'])} steps"
             )
         self.query_one("#row-detail", Static).update(detail)
+        if active_row is not None:
+            mute_display = Text("MUTES  White tile = playing · outline tile = muted\n")
+            for track in range(1, 17):
+                muted = bool(active_row["mute"] & (1 << (track - 1)))
+                style = "dim" if muted else "black on white"
+                mute_display.append(f"⟦{track}⟧", style=style)
+                if track < 16:
+                    mute_display.append(" ")
+        self.query_one("#mute-display", Static).update(mute_display)
 
     def _selected_row(self) -> dict | None:
         if self.active_row_index is None:
