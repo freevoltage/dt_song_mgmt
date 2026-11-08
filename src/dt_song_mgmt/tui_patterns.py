@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 
+from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Label, Static
+from textual.widgets import Button, Input, Label, Static
 
 from .patterns import get_all_patterns_info
 from .songs import pattern_label
@@ -58,24 +59,33 @@ class PatternEntryModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class PatternList(Static):
+    """Focusable, text-rendered pattern list with no table widget chrome."""
+
+    can_focus = True
+
+
 class PatternManagerScreen(ModalScreen[None]):
     """Search and stage operations on the 128 pattern slots."""
 
     CSS = """
-    PatternManagerScreen { align: left top; background: #101010; color: #dedbd2; }
-    #pattern-workspace { width: 100%; height: 100%; padding: 0 2; }
-    #pattern-topline { height: 2; padding-top: 1; }
-    #pattern-heading { width: 1fr; color: #e4e0d6; text-style: bold; }
-    #pattern-project { width: auto; color: #a49f93; }
-    #pattern-banks { height: 2; color: #a49f93; padding-top: 1; border-bottom: solid #37342e; }
-    #pattern-search { height: 3; margin: 1 0; border: none; border-bottom: solid #37342e; background: #101010; }
-    #pattern-search:focus { border-bottom: solid #d6a04b; }
-    #pattern-table { height: 1fr; background: #101010; border: none; }
-    #pattern-table > .datatable--header { background: #191919; color: #a49f93; }
-    #pattern-table > .datatable--cursor { background: #25221c; color: #f1c36d; text-style: bold; }
-    #pattern-table:focus > .datatable--cursor { background: #d6a04b; color: #15120d; }
-    #pattern-selection { height: 2; padding: 0 1; color: #f1c36d; border-top: solid #37342e; }
-    #pattern-help { height: 2; color: #8d887d; padding: 0 1; }
+    PatternManagerScreen { align: left top; background: $background; color: $text; }
+    #pattern-workspace { width: 100%; height: 100%; padding: 0 1; }
+    #pattern-topline { height: 2; }
+    #pattern-heading { width: 1fr; text-style: bold; }
+    #pattern-project { width: auto; }
+    #pattern-content { height: 1fr; }
+    #pattern-bank-pane { width: 14; padding-right: 1; }
+    #pattern-bank-title { height: 1; text-style: bold; }
+    #pattern-banks { height: auto; }
+    #pattern-results { width: 1fr; padding-left: 1; }
+    #pattern-count { height: 1; }
+    #pattern-search { height: 3; margin: 1 0; }
+    #pattern-columns { height: 1; }
+    #pattern-scroll { height: 1fr; }
+    #pattern-list { height: auto; min-height: 1; }
+    #pattern-selection { height: 2; }
+    #pattern-help { height: 2; }
     """
 
     BINDINGS = [
@@ -90,6 +100,12 @@ class PatternManagerScreen(ModalScreen[None]):
         ("7", "filter_bank_g", "Bank G"),
         ("8", "filter_bank_h", "Bank H"),
         ("0", "filter_all_banks", "All banks"),
+        ("up", "select_previous_pattern", "Previous pattern"),
+        ("down", "select_next_pattern", "Next pattern"),
+        ("pageup", "page_up_patterns", "Page up"),
+        ("pagedown", "page_down_patterns", "Page down"),
+        ("home", "select_first_pattern", "First pattern"),
+        ("end", "select_last_pattern", "Last pattern"),
         ("y", "yank_pattern", "Yank pattern"),
         ("x", "cut_pattern_to_clipboard", "Cut pattern"),
         ("p", "paste_pattern", "Paste pattern"),
@@ -108,7 +124,6 @@ class PatternManagerScreen(ModalScreen[None]):
         self.selected_pattern = 0
         self.filter_text = ""
         self.bank_filter = bank_filter
-        self._all_patterns: list[dict] = []
         self._visible_patterns: list[dict] = []
 
     def compose(self) -> ComposeResult:
@@ -116,41 +131,39 @@ class PatternManagerScreen(ModalScreen[None]):
             with Horizontal(id="pattern-topline"):
                 yield Static("PATTERNS", id="pattern-heading")
                 yield Static("", id="pattern-project")
-            yield Static("", id="pattern-banks")
-            yield Input(placeholder="Filter by bank, slot, or pattern name…", id="pattern-search")
-            yield DataTable(id="pattern-table", cursor_type="row", zebra_stripes=True)
+            with Horizontal(id="pattern-content"):
+                with Vertical(id="pattern-bank-pane"):
+                    yield Static("BANK", id="pattern-bank-title")
+                    yield Static("", id="pattern-banks")
+                with Vertical(id="pattern-results"):
+                    yield Static("", id="pattern-count")
+                    yield Input(placeholder="/ to filter slots or names", id="pattern-search")
+                    yield Static("    SLOT  PATTERN NAME                    SONG ROWS", id="pattern-columns")
+                    with VerticalScroll(id="pattern-scroll"):
+                        yield PatternList("", id="pattern-list")
             yield Static("", id="pattern-selection")
             yield Static(
-                "↑/↓ select · PgUp/PgDn scroll · 1–8 banks · 0 all · / search\n"
-                "c copy · m move · d clear · r rename · i import · y copy · x cut · p paste",
+                "↑/↓ browse · PgUp/PgDn jump · Home/End · 1–8 banks · 0 all · / filter · Enter return\n"
+                "c copy · m move · d clear · r rename · i import · y copy · x cut · p paste · Esc back",
                 id="pattern-help",
             )
-        yield Footer()
 
     def on_mount(self) -> None:
-        table = self.query_one("#pattern-table", DataTable)
-        table.add_columns("Slot", "Pattern name", "Song rows")
-        self._refresh_table()
-        table.focus()
+        pattern_list = self.query_one("#pattern-list", PatternList)
+        self._refresh_view()
+        pattern_list.focus()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "pattern-search":
             self.filter_text = event.value.strip().casefold()
-            self._refresh_table()
+            self._refresh_view()
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.data_table.id != "pattern-table" or event.row_key is None:
-            return
-        try:
-            self.selected_pattern = int(event.row_key.value)
-        except (TypeError, ValueError):
-            pass
-        self._refresh_selection()
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "pattern-search":
+            self.query_one("#pattern-list", PatternList).focus()
 
-    def _refresh_table(self) -> None:
-        table = self.query_one("#pattern-table", DataTable)
+    def _refresh_view(self) -> None:
         all_patterns = get_all_patterns_info(self.session.working_raw())
-        self._all_patterns = all_patterns
         patterns = all_patterns
         if self.bank_filter is not None:
             patterns = [pattern for pattern in patterns if pattern["index"] // 16 == self.bank_filter]
@@ -161,42 +174,46 @@ class PatternManagerScreen(ModalScreen[None]):
                 or self.filter_text in pattern["name"].casefold()
             ]
         self._visible_patterns = patterns
-        named_count = sum(bool(pattern["name"].strip()) for pattern in all_patterns)
         bank_label = "ALL BANKS" if self.bank_filter is None else f"BANK {chr(ord('A') + self.bank_filter)}"
-        heading = f"PATTERN MANAGER    {bank_label} · {len(patterns)} slots · {named_count}/128 named"
         clipboard = self._clipboard()
+        draft_status = f"DRAFT {len(self.session.operations)}" if self.session.operations else "CLEAN"
+        project_line = f"{self.session.device} / {self.session.path.name}"
         if clipboard:
             action = "CUT" if clipboard["mode"] == "cut" else "COPY"
-            heading += f"    CLIPBOARD {action} {pattern_label(clipboard['slot'])}"
-        self.query_one("#pattern-heading", Static).update(heading)
-        draft_status = f"DRAFT · {len(self.session.operations)} edits" if self.session.operations else "CLEAN"
-        self.query_one("#pattern-project", Static).update(
-            f"{self.session.device}  /  {self.session.path.name}  ·  {draft_status}"
-        )
-        bank_items = []
+            project_line += f" · {action} {pattern_label(clipboard['slot'])} ready"
+        self.query_one("#pattern-heading", Static).update("PATTERNS")
+        self.query_one("#pattern-project", Static).update(f"{project_line}  ·  {draft_status}")
+        bank_text = Text()
+        bank_text.append("\n")
         for bank in range(8):
             name = chr(ord("A") + bank)
-            bank_items.append(
-                f"[{name} {bank + 1}]" if self.bank_filter == bank else f" {name} {bank + 1} "
-            )
-        all_marker = "[ALL 0]" if self.bank_filter is None else " ALL 0 "
-        self.query_one("#pattern-banks", Static).update(
-            f"BANKS   {'  '.join(bank_items)}     {all_marker}"
+            marker = ">" if self.bank_filter == bank else " "
+            bank_text.append(f"{marker} {name}    {bank + 1}\n", style="reverse bold" if marker == ">" else None)
+        all_marker = ">" if self.bank_filter is None else " "
+        bank_text.append(f"{all_marker} ALL    0", style="reverse bold" if all_marker == ">" else None)
+        self.query_one("#pattern-banks", Static).update(bank_text)
+        named_count = sum(bool(pattern["name"].strip()) for pattern in all_patterns)
+        self.query_one("#pattern-count", Static).update(
+            f"{bank_label}  ·  {len(patterns)} slots  ·  {named_count}/128 named"
         )
-        table.clear(columns=False)
+        visible_indices = [pattern["index"] for pattern in patterns]
+        if visible_indices and self.selected_pattern not in visible_indices:
+            self.selected_pattern = visible_indices[0]
+        selected_row = visible_indices.index(self.selected_pattern) if visible_indices else 0
+        content = Text()
         for pattern in patterns:
             name = pattern["name"].strip() or "(unnamed)"
-            table.add_row(
-                pattern["label"],
-                name,
-                str(pattern["ref_count"]),
-                key=str(pattern["index"]),
-            )
+            marker = ">" if pattern["index"] == self.selected_pattern else " "
+            line = f"{marker} {pattern['label']:<4}  {name:<18}  {pattern['ref_count']:>3} rows"
+            content.append(line, style="reverse bold" if marker == ">" else None)
+            content.append("\n")
+        if not patterns:
+            content.append("No slots match this filter. Press / and clear the search.")
+        self.query_one("#pattern-list", PatternList).update(content)
         if patterns:
-            visible_indices = [pattern["index"] for pattern in patterns]
-            if self.selected_pattern not in visible_indices:
-                self.selected_pattern = visible_indices[0]
-            table.move_cursor(row=visible_indices.index(self.selected_pattern), column=0)
+            self.query_one("#pattern-scroll", VerticalScroll).scroll_to(
+                y=selected_row, animate=False, force=True
+            )
         self._refresh_selection()
 
     def _refresh_selection(self) -> None:
@@ -218,9 +235,39 @@ class PatternManagerScreen(ModalScreen[None]):
     def action_focus_filter(self) -> None:
         self.query_one("#pattern-search", Input).focus()
 
+    def _move_selection(self, delta: int) -> None:
+        if not self._visible_patterns:
+            return
+        indices = [pattern["index"] for pattern in self._visible_patterns]
+        current = indices.index(self.selected_pattern) if self.selected_pattern in indices else 0
+        self.selected_pattern = max(0, min(len(indices) - 1, current + delta))
+        self._refresh_view()
+
+    def action_select_previous_pattern(self) -> None:
+        self._move_selection(-1)
+
+    def action_select_next_pattern(self) -> None:
+        self._move_selection(1)
+
+    def action_page_up_patterns(self) -> None:
+        self._move_selection(-12)
+
+    def action_page_down_patterns(self) -> None:
+        self._move_selection(12)
+
+    def action_select_first_pattern(self) -> None:
+        if self._visible_patterns:
+            self.selected_pattern = self._visible_patterns[0]["index"]
+            self._refresh_view()
+
+    def action_select_last_pattern(self) -> None:
+        if self._visible_patterns:
+            self.selected_pattern = self._visible_patterns[-1]["index"]
+            self._refresh_view()
+
     def _select_bank(self, bank: int | None) -> None:
         self.bank_filter = bank
-        self._refresh_table()
+        self._refresh_view()
 
     def action_filter_bank_a(self) -> None:
         self._select_bank(0)
@@ -252,7 +299,7 @@ class PatternManagerScreen(ModalScreen[None]):
     def _stage(self, operation: dict, message: str) -> None:
         try:
             self.session.stage(operation)
-            self._refresh_table()
+            self._refresh_view()
             self.app.notify(message)
         except Exception as exc:
             self.app.notify(str(exc), severity="error", timeout=8)
@@ -272,7 +319,7 @@ class PatternManagerScreen(ModalScreen[None]):
             "slot": self.selected_pattern,
             "mode": "copy",
         })
-        self._refresh_table()
+        self._refresh_view()
         self.app.notify(f"Copied {pattern_label(self.selected_pattern)} to the pattern clipboard")
 
     def action_cut_pattern_to_clipboard(self) -> None:
@@ -282,7 +329,7 @@ class PatternManagerScreen(ModalScreen[None]):
             "slot": self.selected_pattern,
             "mode": "cut",
         })
-        self._refresh_table()
+        self._refresh_view()
         self.app.notify(
             f"Marked {pattern_label(self.selected_pattern)} to move; choose a destination and press p"
         )
@@ -333,7 +380,7 @@ class PatternManagerScreen(ModalScreen[None]):
             self._set_clipboard(None)
             if source_session is not self.session and self.clipboard_owner is not None:
                 self.clipboard_owner._refresh_tab_labels()
-        self._refresh_table()
+        self._refresh_view()
         verb = "Moved" if is_cut else "Pasted"
         message = f"{verb} {pattern_label(source)} to {pattern_label(destination)} in the draft"
         if is_cut and source_session is not self.session:
@@ -378,7 +425,7 @@ class PatternManagerScreen(ModalScreen[None]):
             f"Copied {pattern_label(source)} to {pattern_label(destination)} in the draft; press s to save",
         )
         self.selected_pattern = destination
-        self._refresh_table()
+        self._refresh_view()
 
     def _on_move_destination(self, value: str | None) -> None:
         if value is None:
@@ -397,7 +444,7 @@ class PatternManagerScreen(ModalScreen[None]):
             f"Moved {pattern_label(source)} to {pattern_label(destination)} in the draft; press s to save",
         )
         self.selected_pattern = destination
-        self._refresh_table()
+        self._refresh_view()
 
     def action_copy_pattern(self) -> None:
         self._prompt_slot("Copy pattern", self._on_copy_destination)
@@ -487,7 +534,7 @@ class PatternManagerScreen(ModalScreen[None]):
                 [{"src_idx": source_slot, "dst_idx": destination}],
                 source_raw=source_raw,
             )
-            self._refresh_table()
+            self._refresh_view()
             self.app.notify(
                 f"Imported {pattern_label(source_slot)} to {pattern_label(destination)} in the draft; press s to save"
             )
