@@ -13,6 +13,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Input, Label, Static, Tab, Tabs
 
+from .constants import SONG_ROW_LABELS
 from .session import ProjectSession
 from .songs import (
     SONG_ROW_MAX,
@@ -728,7 +729,7 @@ class ProjectBrowser(App[None]):
             elif field == "mutes":
                 self.action_toggle_mute()
             elif field == "label":
-                self.notify("The row label is read-only", severity="warning")
+                self.action_edit_label()
 
     def _move_cursor(self, delta: int | None = None, edge: str | None = None) -> None:
         songs_list = self.query_one("#songs-list", NavigatorList)
@@ -1174,6 +1175,55 @@ class ProjectBrowser(App[None]):
             self.notify("Row length must be an integer from 1 to 1024", severity="error")
             return
         self._stage_row_update({"length": length}, f"Row length set to {length}; press s to save")
+
+    def action_edit_label(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            return
+        label_idx = row["label_idx"]
+        if label_idx == 0:
+            current = "(none)"
+        elif label_idx == 1:
+            current = "Pattern name"
+        elif label_idx < len(SONG_ROW_LABELS) and SONG_ROW_LABELS[label_idx]:
+            current = SONG_ROW_LABELS[label_idx]
+        else:
+            current = f"T{label_idx}"
+        choices = ["(none)", "Pattern name"] + [
+            label for label in SONG_ROW_LABELS if label
+        ]
+        self.push_screen(
+            EntryModal(
+                "Edit row label",
+                "Enter a label: " + ", ".join(choices),
+                "label",
+                current,
+            ),
+            self._on_label_choice,
+        )
+
+    def _on_label_choice(self, value: str | None) -> None:
+        if value is None:
+            return
+        text = value.strip()
+        normalized = text.casefold()
+        if normalized in {"", "none", "(none)"}:
+            label_idx = 0
+        elif normalized in {"pattern", "pattern name"}:
+            label_idx = 1
+        else:
+            label_idx = next(
+                (idx for idx, label in enumerate(SONG_ROW_LABELS) if label and label.casefold() == normalized),
+                None,
+            )
+            if label_idx is None and re.fullmatch(r"t\d{1,3}", normalized):
+                label_idx = int(normalized[1:])
+                if label_idx > 255:
+                    label_idx = None
+            if label_idx is None:
+                self.notify("Choose one of the listed row labels", severity="error")
+                return
+        self._stage_row_update({"label_idx": label_idx}, f"Row label set to {text or '(none)'}; press s to save")
 
     def action_toggle_mute(self) -> None:
         row = self._selected_row()

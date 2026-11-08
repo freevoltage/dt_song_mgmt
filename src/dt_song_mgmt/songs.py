@@ -546,4 +546,6 @@ def update_row_fields(rec: bytes, row_indices: list[int], updates: dict) -> byte
                 struct.pack_into(">H", row, 9, int(updates["length"]) & 0xFFFF)
             if "pattern" in updates and updates["pattern"] is not None:
                 row[0] = int(updates["pattern"]) & 0x7F
+            if "label_idx" in updates and updates["label_idx"] is not None:
+                row[1] = int(updates["label_idx"]) & 0xFF
     return set_song_rows(rec, rows)
