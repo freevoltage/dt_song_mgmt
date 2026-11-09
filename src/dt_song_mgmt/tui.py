@@ -466,8 +466,8 @@ class ProjectBrowser(App[None]):
         ("f4", "open_song_pattern_overview", "Song pattern overview"),
         ("ctrl+o", "open_project", "Open project"),
         ("ctrl+n", "new_project", "New empty project"),
-        ("ctrl+tab", "next_project", "Next project"),
-        ("ctrl+shift+tab", "previous_project", "Previous project"),
+        ("]", "next_project", "Next project"),
+        ("[", "previous_project", "Previous project"),
         ("1", "select_bank_a", "Bank A"),
         ("2", "select_bank_b", "Bank B"),
         ("3", "select_bank_c", "Bank C"),
@@ -516,7 +516,7 @@ class ProjectBrowser(App[None]):
                 yield Static("", id="row-detail")
         yield Static("", id="mute-display")
         yield Static(
-            "↑↓ rows · ←/→ columns · Tab panes · Enter edits cell · Ctrl+N new project\n"
+            "↑↓ rows · ←/→ columns · Tab panes · [/] projects · Enter edits cell · Ctrl+N new project\n"
             "Songs Y/X/P bundle · Rows c/m/d · filled = playing · outline = muted · s save",
             id="message",
         )
