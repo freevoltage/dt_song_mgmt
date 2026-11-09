@@ -36,10 +36,10 @@ def _decode_addition(addition: dict) -> tuple[dict, bytes, zipfile.ZipInfo | Non
         expected_size = int(entry["FileSize"])
     except (KeyError, TypeError, ValueError):
         raise ValueError("sample addition has a missing or invalid FileSize") from None
-    if len(data) != expected_size:
-        raise ValueError(
-            f"sample asset size does not match its manifest ({len(data)} != {expected_size} bytes)"
-        )
+    # Elektron FileSize is sample payload metadata, not the archive WAV's
+    # byte length. WAV headers/chunks make the actual member larger.
+    if expected_size < 0 or not data:
+        raise ValueError("sample addition has invalid size metadata or empty file data")
     info = addition.get("zipinfo")
     if info is not None and not isinstance(info, zipfile.ZipInfo):
         raise ValueError("sample addition zipinfo must be a ZipInfo")

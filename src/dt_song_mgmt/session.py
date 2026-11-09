@@ -8,7 +8,7 @@ import json
 import shutil
 from uuid import uuid4
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .constants import (
     DT2_IMAGE_SIZE,
@@ -670,6 +670,7 @@ class ProjectSession:
                 source_manifest,
                 source_members,
                 [src for src, _dst in pairs],
+                source,
             )
         self.stage(operation)
 
@@ -732,7 +733,7 @@ class ProjectSession:
         }
         if self.device == "DT2":
             operation["asset_additions"] = self._sample_asset_additions(
-                source_raw, source_manifest, source_members, [src for src, _dst in pairs]
+                source_raw, source_manifest, source_members, [src for src, _dst in pairs], source
             )
         self.stage(operation)
 
@@ -794,8 +795,9 @@ class ProjectSession:
         source_manifest: dict,
         source_members: list[tuple],
         pattern_indices: list[int],
+        source_path: Path | None = None,
     ) -> list[dict]:
-        """Capture only manifest-backed WAV assets needed by copied patterns."""
+        """Capture WAV assets needed by copied patterns from the project or nearby library."""
         needed_hashes: set[int] = set()
         sample_details: dict[int, dict] = {}
         for pattern_index in set(pattern_indices):
@@ -818,6 +820,7 @@ class ProjectSession:
                 continue
         member_data = {info.filename: data for info, data in source_members}
         additions = []
+        missing_by_hash: dict[int, dict] = {}
         missing_assets = []
         for sample_hash in sorted(needed_hashes):
             if sample_hash not in manifest_by_hash:
@@ -826,26 +829,125 @@ class ProjectSession:
                 # with the pattern. Pool-less default hashes can be built-in
                 # device samples and remain valid device references.
                 if detail["pool_slots"]:
-                    tracks = sorted(detail["default_tracks"] | detail["locked_tracks"])
-                    track_names = ", ".join(f"T{track + 1}" for track in tracks) or "unknown tracks"
-                    missing_assets.append(f"{sample_hash:08X} ({track_names})")
+                    missing_by_hash[sample_hash] = detail
                 continue
             entry = manifest_by_hash[sample_hash]
             filename = str(entry.get("FileName", ""))
             if not filename or filename not in member_data:
-                raise ValueError(f"source project is missing sample asset for hash {sample_hash:08X}")
+                missing_by_hash[sample_hash] = sample_details[sample_hash]
+                continue
             additions.append({
                 "entry": entry,
                 "filename": filename,
                 "data_base64": base64.b64encode(member_data[filename]).decode("ascii"),
             })
+        if missing_by_hash and source_path is not None:
+            additions.extend(
+                ProjectSession._nearby_digitakt_asset_additions(source_path, missing_by_hash)
+            )
+        available_hashes = {
+            int(addition["entry"]["Hash"])
+            for addition in additions
+        }
+        for sample_hash, detail in missing_by_hash.items():
+            if sample_hash in available_hashes:
+                continue
+            tracks = sorted(detail["default_tracks"] | detail["locked_tracks"])
+            track_names = ", ".join(f"T{track + 1}" for track in tracks) or "unknown tracks"
+            missing_assets.append(f"{sample_hash:08X} ({track_names})")
         if missing_assets:
             missing = ", ".join(missing_assets)
             raise ValueError(
-                "cannot copy this Digitakt pattern because its sample-pool audio is not present "
-                f"in the source project archive: {missing}. Add the missing WAV asset to the "
-                "source project and retry."
+                "cannot copy this Digitakt pattern because audio is missing from the project "
+                f"archive and nearby Digitakt sample libraries: {missing}."
             )
+        return additions
+
+    @staticmethod
+    def _nearby_digitakt_asset_additions(source_path: Path, missing: dict[int, dict]) -> list[dict]:
+        """Find only requested sample hashes in nearby indexed Digitakt libraries."""
+        roots: list[Path] = []
+        current = source_path.expanduser().resolve().parent
+        for _depth in range(3):
+            marker = current / ".digitakt-manifest.json"
+            if marker.is_file() and current not in roots:
+                roots.append(current)
+            try:
+                children = list(current.iterdir())
+            except OSError:
+                children = []
+            for child in children:
+                if (
+                    child.is_dir()
+                    and (child / ".digitakt-manifest.json").is_file()
+                    and child not in roots
+                ):
+                    roots.append(child)
+            current = current.parent
+
+        candidates: dict[int, list[tuple[Path, str]]] = {}
+        for root in roots:
+            marker = root / ".digitakt-manifest.json"
+            try:
+                library = json.loads(marker.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            files = library.get("files", {}) if isinstance(library, dict) else {}
+            if not isinstance(files, dict):
+                continue
+            for relative, metadata in files.items():
+                if not isinstance(relative, str) or not isinstance(metadata, dict):
+                    continue
+                try:
+                    value = metadata.get("hash")
+                    if isinstance(value, str):
+                        normalized = value.strip().lower()
+                        sample_hash = int(
+                            normalized,
+                            16
+                            if normalized.startswith("0x") or len(normalized.removeprefix("0x")) <= 8
+                            else 10,
+                        )
+                    else:
+                        sample_hash = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if sample_hash in missing:
+                    candidates.setdefault(sample_hash, []).append((root, relative))
+
+        additions = []
+        for sample_hash, paths in candidates.items():
+            for root, relative in paths:
+                library_path = PurePosixPath(relative)
+                if library_path.is_absolute() or ".." in library_path.parts:
+                    continue
+                root_resolved = root.resolve()
+                try:
+                    wav_path = (root / Path(*library_path.parts)).resolve()
+                    wav_path.relative_to(root_resolved)
+                    data = wav_path.read_bytes()
+                except (OSError, ValueError):
+                    continue
+                if not data:
+                    continue
+                sample_size = missing[sample_hash].get("size")
+                if not isinstance(sample_size, int) or sample_size <= 16:
+                    continue
+                # DT2's pool row size is 16 bytes larger than the FileSize
+                # recorded in known project manifests for the same hash.
+                filename = library_path.as_posix()
+                if not filename.startswith("Samples/"):
+                    filename = f"Samples/{filename}"
+                additions.append({
+                    "entry": {
+                        "FileName": filename,
+                        "FileSize": sample_size - 16,
+                        "Hash": str(sample_hash),
+                    },
+                    "filename": filename,
+                    "data_base64": base64.b64encode(data).decode("ascii"),
+                })
+                break
         return additions
 
     def stage_song_file_restore(self, dst_slot: int, record: bytes) -> None:
