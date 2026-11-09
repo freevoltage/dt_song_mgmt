@@ -516,7 +516,7 @@ class ProjectBrowser(App[None]):
                 yield Static("", id="row-detail")
         yield Static("", id="mute-display")
         yield Static(
-            "↑↓ rows · ←/→ columns · Tab panes · [/] projects · Enter edits cell · Ctrl+N new project\n"
+            "↑↓ rows · ←/→ columns · Tab panes · brackets switch projects · Enter edits cell · Ctrl+N new project\n"
             "Songs Y/X/P bundle · Rows c/m/d · filled = playing · outline = muted · s save",
             id="message",
         )
