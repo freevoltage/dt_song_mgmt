@@ -57,7 +57,8 @@ class SampleMemoryScreen(ModalScreen[None]):
                 f"Shared samples: {self.analysis['shared_sample_count']} · "
                 f"Unreferenced project samples: {self.analysis['unreferenced_sample_count']} "
                 f"({format_bytes(self.analysis['unreferenced_sample_bytes'])}). "
-                "Includes kit samples and sample locks. Pool-only assets may not be in this archive; sizes do not guarantee freed RAM.",
+                f"Unresolved patterns: {self.analysis['pattern_error_count']}. "
+                "Pool-only assets may not be in this archive; sizes do not guarantee freed RAM.",
                 id="memory-note",
             )
             with Vertical(id="memory-columns"):
@@ -97,6 +98,9 @@ class SampleMemoryScreen(ModalScreen[None]):
         table = self.query_one("#memory-samples", DataTable)
         table.clear(columns=False)
         entry = self.analysis["patterns"][self.selected_pattern]
+        if entry.get("error"):
+            table.add_row(entry["error"], "", "", "", "unknown", "")
+            return
         for sample in entry["samples"]:
             track_text = ",".join(f"{track + 1:02}" for track in sample["tracks"])
             table.add_row(

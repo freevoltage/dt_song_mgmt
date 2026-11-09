@@ -473,7 +473,7 @@ class PatternManagerScreen(ModalScreen[None]):
         if destination_info["ref_count"]:
             context.append(f"destination users now play the pasted pattern: {self._reference_summary(destination_info)}")
         if source_session is not self.session and self.session.device == "DT2":
-            context.append("Digitakt WAV assets and sample-lock pool slots staged with the pattern")
+            context.append("Available WAVs staged; factory sounds may use device references")
         if context:
             message += " · " + " · ".join(context)
         self.app.notify(message, timeout=10)
@@ -670,7 +670,7 @@ class PatternManagerScreen(ModalScreen[None]):
             if destination_info["ref_count"]:
                 message += f" · destination users now play the imported pattern: {self._reference_summary(destination_info)}"
             if self.session.device == "DT2":
-                message += " · Digitakt WAV assets and sample-lock pool slots staged with the pattern"
+                message += " · Available WAVs staged; factory sounds may use device references"
             self.app.notify(message, timeout=10)
         except Exception as exc:
             self.app.notify(str(exc), severity="error", timeout=10)

@@ -689,14 +689,19 @@ class ProjectSession:
         operation = {"type": "pattern_move", "src_idx": source, "dst_idx": destination}
         if self.device == "DT2":
             raw = self.working_raw()
-            removed_hashes = set()
-            for index in (source, destination):
-                removed_hashes.update(pattern_sample_hashes(raw, index))
-            moved_raw = apply_operations(raw, [operation])
-            retained_hashes = set()
-            for pattern in get_all_patterns_info(moved_raw):
-                retained_hashes.update(pattern_sample_hashes(moved_raw, pattern["index"]))
-            release_hashes = sorted(removed_hashes - retained_hashes)
+            try:
+                removed_hashes = set()
+                for index in (source, destination):
+                    removed_hashes.update(pattern_sample_hashes(raw, index))
+                moved_raw = apply_operations(raw, [operation])
+                retained_hashes = set()
+                for pattern in get_all_patterns_info(moved_raw):
+                    retained_hashes.update(pattern_sample_hashes(moved_raw, pattern["index"]))
+                release_hashes = sorted(removed_hashes - retained_hashes)
+            except ValueError:
+                # Unknown references make sample cleanup unsafe; moving the
+                # pattern itself can still retain all pool rows and WAVs.
+                release_hashes = []
             if release_hashes:
                 operation["release_hashes"] = release_hashes
                 operation["asset_removals"] = release_hashes
@@ -814,10 +819,13 @@ class ProjectSession:
                     "default_tracks": set(),
                     "locked_tracks": set(),
                     "pool_slots": set(),
+                    "size": detail["size"],
                 })
                 existing["default_tracks"].update(detail["default_tracks"])
                 existing["locked_tracks"].update(detail["locked_tracks"])
                 existing["pool_slots"].update(detail["pool_slots"])
+                if existing["size"] is None:
+                    existing["size"] = detail["size"]
         manifest_by_hash: dict[int, dict] = {}
         for entry in source_manifest.get("Samples", []):
             try:
@@ -844,8 +852,9 @@ class ProjectSession:
                 "filename": filename,
                 "data_base64": base64.b64encode(member_data[filename]).decode("ascii"),
             })
+        device_available_hashes: set[int] = set()
         if missing_by_hash and source_path is not None:
-            library_additions, _device_available_hashes = (
+            library_additions, device_available_hashes = (
                 ProjectSession._nearby_digitakt_asset_additions(source_path, missing_by_hash)
             )
             additions.extend(library_additions)
@@ -854,7 +863,7 @@ class ProjectSession:
             for addition in additions
         }
         for sample_hash, detail in missing_by_hash.items():
-            if sample_hash in available_hashes:
+            if sample_hash in available_hashes or sample_hash in device_available_hashes:
                 continue
             tracks = sorted(detail["default_tracks"] | detail["locked_tracks"])
             track_names = ", ".join(f"T{track + 1}" for track in tracks) or "unknown tracks"
@@ -891,6 +900,14 @@ class ProjectSession:
                 ):
                     roots.append(child)
             current = current.parent
+
+        digitakt_folder = Path.home() / "Music" / "Digitakt"
+        try:
+            for child in digitakt_folder.iterdir():
+                if child.is_dir() and (child / ".digitakt-manifest.json").is_file() and child not in roots:
+                    roots.append(child)
+        except OSError:
+            pass
 
         candidates: dict[int, list[tuple[Path, str]]] = {}
         for root in roots:
@@ -934,7 +951,11 @@ class ProjectSession:
                     wav_path = (root / Path(*library_path.parts)).resolve()
                     wav_path.relative_to(root_resolved)
                     data = wav_path.read_bytes()
-                except (OSError, ValueError):
+                except ValueError:
+                    continue
+                except OSError:
+                    if library_path.parts and library_path.parts[0].casefold() == "factory":
+                        device_available_hashes.add(sample_hash)
                     continue
                 if not data:
                     continue

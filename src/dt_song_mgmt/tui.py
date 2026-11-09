@@ -799,7 +799,7 @@ class ProjectBrowser(App[None]):
         if clipboard["mode"] == "cut":
             self._dsm_clipboard = None
             sample_note = (
-                " Digitakt WAV assets and sample-lock slots were transferred."
+                " Available Digitakt WAVs were staged; factory sounds may use device references."
                 if self.session.device == "DT2" else ""
             )
             self.notify(
@@ -808,7 +808,7 @@ class ProjectBrowser(App[None]):
             )
         else:
             sample_note = (
-                " Digitakt WAV assets and sample-lock slots were transferred."
+                " Available Digitakt WAVs were staged; factory sounds may use device references."
                 if self.session.device == "DT2" else ""
             )
             self.notify(
