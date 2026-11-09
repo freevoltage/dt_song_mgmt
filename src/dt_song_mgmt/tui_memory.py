@@ -33,7 +33,14 @@ class SampleMemoryScreen(ModalScreen[None]):
         super().__init__()
         self.session = session
         self.selected_pattern = 0
-        self.analysis = analyze_sample_memory(session.working_raw(), session.working_manifest())
+        manifest = session.working_manifest()
+        self.analysis = analyze_sample_memory(session.working_raw(), manifest)
+        members = {info.filename for info, _data in session.working_members()}
+        self.archived_hashes = {
+            int(item["Hash"]) for item in manifest.get("Samples", [])
+            if isinstance(item, dict) and str(item.get("Hash", "")).isdigit()
+            and item.get("FileName") in members
+        }
 
     def compose(self) -> ComposeResult:
         total = self.analysis["project_sample_bytes"]
@@ -71,7 +78,7 @@ class SampleMemoryScreen(ModalScreen[None]):
                 key=str(entry["index"]),
             )
         samples = self.query_one("#memory-samples", DataTable)
-        samples.add_columns("Sample", "Tracks", "Patterns", "Size", "Use")
+        samples.add_columns("Sample", "Tracks", "Patterns", "Size", "Audio", "Use")
         patterns.focus()
         if ranked:
             self.selected_pattern = ranked[0]["index"]
@@ -97,10 +104,11 @@ class SampleMemoryScreen(ModalScreen[None]):
                 track_text,
                 str(sample["pattern_count"]),
                 format_bytes(sample["size"]),
+                "in archive" if sample["hash"] in self.archived_hashes else "reference only",
                 ("shared" if sample["shared"] else "unique") + (" · locked" if sample.get("sample_locked") else ""),
             )
         if not entry["samples"]:
-            table.add_row("No samples referenced by this pattern", "", "", "", "")
+            table.add_row("No samples referenced by this pattern", "", "", "", "", "")
 
     def action_close(self) -> None:
         self.dismiss(None)

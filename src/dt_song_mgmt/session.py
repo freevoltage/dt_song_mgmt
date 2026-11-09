@@ -831,11 +831,8 @@ class ProjectSession:
         for sample_hash in sorted(needed_hashes):
             if sample_hash not in manifest_by_hash:
                 detail = sample_details[sample_hash]
-                # Pool-backed rows represent user assets whose bytes must travel
-                # with the pattern. Pool-less default hashes can be built-in
-                # device samples and remain valid device references.
-                if detail["pool_slots"]:
-                    missing_by_hash[sample_hash] = detail
+                # A device reference alone does not include the sample audio.
+                missing_by_hash[sample_hash] = detail
                 continue
             entry = manifest_by_hash[sample_hash]
             filename = str(entry.get("FileName", ""))
@@ -847,9 +844,8 @@ class ProjectSession:
                 "filename": filename,
                 "data_base64": base64.b64encode(member_data[filename]).decode("ascii"),
             })
-        device_available_hashes: set[int] = set()
         if missing_by_hash and source_path is not None:
-            library_additions, device_available_hashes = (
+            library_additions, _device_available_hashes = (
                 ProjectSession._nearby_digitakt_asset_additions(source_path, missing_by_hash)
             )
             additions.extend(library_additions)
@@ -858,7 +854,7 @@ class ProjectSession:
             for addition in additions
         }
         for sample_hash, detail in missing_by_hash.items():
-            if sample_hash in available_hashes or sample_hash in device_available_hashes:
+            if sample_hash in available_hashes:
                 continue
             tracks = sorted(detail["default_tracks"] | detail["locked_tracks"])
             track_names = ", ".join(f"T{track + 1}" for track in tracks) or "unknown tracks"
@@ -867,7 +863,7 @@ class ProjectSession:
             missing = ", ".join(missing_assets)
             raise ValueError(
                 "cannot copy this Digitakt pattern because audio is missing from the project "
-                f"archive and nearby Digitakt sample libraries: {missing}."
+                f"archive and nearby Digitakt sample libraries: {missing}. Download the missing WAV files to the indexed library and retry."
             )
         return additions
 
@@ -939,9 +935,6 @@ class ProjectSession:
                     wav_path.relative_to(root_resolved)
                     data = wav_path.read_bytes()
                 except (OSError, ValueError):
-                    if library_path.parts and library_path.parts[0].casefold() == "factory":
-                        device_available_hashes.add(sample_hash)
-                        break
                     continue
                 if not data:
                     continue
