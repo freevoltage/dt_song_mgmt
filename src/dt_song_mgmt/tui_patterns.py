@@ -423,8 +423,10 @@ class PatternManagerScreen(ModalScreen[None]):
             return
         try:
             if source_session is self.session:
-                operation_type = "pattern_move" if is_cut else "pattern_copy"
-                self.session.stage({"type": operation_type, "src_idx": source, "dst_idx": destination})
+                if is_cut:
+                    self.session.stage_pattern_move(source, destination)
+                else:
+                    self.session.stage({"type": "pattern_copy", "src_idx": source, "dst_idx": destination})
             else:
                 source_raw = source_session.working_raw()
                 source_members = source_session.working_members()
@@ -537,12 +539,20 @@ class PatternManagerScreen(ModalScreen[None]):
             message += f" · song rows retargeted: {self._reference_summary(source_info)}"
         if destination_info["ref_count"]:
             message += f" · existing destination users now play the moved pattern: {self._reference_summary(destination_info)}"
-        self._stage(
-            {"type": "pattern_move", "src_idx": source, "dst_idx": destination},
-            message,
-        )
+        if not self._stage_move(source, destination, message):
+            return
         self.selected_pattern = destination
         self._refresh_view()
+
+    def _stage_move(self, source: int, destination: int, message: str) -> bool:
+        try:
+            self.session.stage_pattern_move(source, destination)
+            self._refresh_view()
+            self.app.notify(message, timeout=10)
+            return True
+        except Exception as exc:
+            self.app.notify(f"Could not move pattern: {exc}", severity="error", timeout=10)
+            return False
 
     def action_copy_pattern(self) -> None:
         self._prompt_slot("Copy pattern", self._on_copy_destination)

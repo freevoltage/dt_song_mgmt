@@ -215,6 +215,9 @@ class ProjectSession:
                     raw = clear_sample_pool_hashes(raw, set(operation["release_hashes"]))
             else:
                 raw = apply_operations(raw, [operation])
+                if op_type == "pattern_move" and self.device == "DT2" and operation.get("release_hashes"):
+                    from .dt2_samples import clear_sample_pool_hashes
+                    raw = clear_sample_pool_hashes(raw, set(operation["release_hashes"]))
         return raw
 
     @staticmethod
@@ -566,10 +569,14 @@ class ProjectSession:
         if source == self.path:
             raise ValueError("choose a different source project")
         pairs = validate_pattern_mapping(mappings)
-        if source_manifest is None or source_members is None:
-            source_manifest, _source_payload, source_members = read_project(source)
+        if source_raw is None or source_manifest is None or source_members is None:
+            loaded_manifest, _source_payload, loaded_members = read_project(source)
             if source_raw is None:
                 _source_head, source_raw = unpack_project(_source_payload)
+            if source_manifest is None:
+                source_manifest = loaded_manifest
+            if source_members is None:
+                source_members = loaded_members
         operation = {
             "type": "pattern_import",
             "src_path": str(source),
@@ -581,13 +588,36 @@ class ProjectSession:
                 "source_image_length": len(source_raw),
                 "source_image_sha256": hashlib.sha256(source_raw).hexdigest(),
             })
-        if self.device == "DT2" and source_raw is not None:
+        if self.device == "DT2":
+            assert source_raw is not None and source_manifest is not None and source_members is not None
             operation["asset_additions"] = self._sample_asset_additions(
                 source_raw,
                 source_manifest,
                 source_members,
                 [src for src, _dst in pairs],
             )
+        self.stage(operation)
+
+    def stage_pattern_move(self, src_idx: int, dst_idx: int) -> None:
+        """Stage an in-project pattern move and release unreferenced DT2 samples."""
+        pairs = validate_pattern_mapping([{"src_idx": src_idx, "dst_idx": dst_idx}])
+        source, destination = pairs[0]
+        if source == destination:
+            raise ValueError("source and destination are the same pattern")
+        operation = {"type": "pattern_move", "src_idx": source, "dst_idx": destination}
+        if self.device == "DT2":
+            raw = self.working_raw()
+            removed_hashes = set()
+            for index in (source, destination):
+                removed_hashes.update(pattern_sample_hashes(raw, index))
+            moved_raw = apply_operations(raw, [operation])
+            retained_hashes = set()
+            for pattern in get_all_patterns_info(moved_raw):
+                retained_hashes.update(pattern_sample_hashes(moved_raw, pattern["index"]))
+            release_hashes = sorted(removed_hashes - retained_hashes)
+            if release_hashes:
+                operation["release_hashes"] = release_hashes
+                operation["asset_removals"] = release_hashes
         self.stage(operation)
 
     def stage_song_bundle_import(
@@ -692,17 +722,39 @@ class ProjectSession:
     ) -> list[dict]:
         """Capture only manifest-backed WAV assets needed by copied patterns."""
         needed_hashes: set[int] = set()
+        sample_details: dict[int, dict] = {}
         for pattern_index in set(pattern_indices):
-            needed_hashes.update(pattern_sample_hashes(source_raw, pattern_index))
+            details = pattern_sample_hashes(source_raw, pattern_index)
+            needed_hashes.update(details)
+            for sample_hash, detail in details.items():
+                existing = sample_details.setdefault(sample_hash, {
+                    "default_tracks": set(),
+                    "locked_tracks": set(),
+                    "pool_slots": set(),
+                })
+                existing["default_tracks"].update(detail["default_tracks"])
+                existing["locked_tracks"].update(detail["locked_tracks"])
+                existing["pool_slots"].update(detail["pool_slots"])
         manifest_by_hash: dict[int, dict] = {}
         for entry in source_manifest.get("Samples", []):
             try:
-                manifest_by_hash[int(entry["Hash"])] = entry
+                manifest_by_hash.setdefault(int(entry["Hash"]), entry)
             except (KeyError, TypeError, ValueError):
                 continue
         member_data = {info.filename: data for info, data in source_members}
         additions = []
-        for sample_hash in sorted(needed_hashes & manifest_by_hash.keys()):
+        missing_assets = []
+        for sample_hash in sorted(needed_hashes):
+            if sample_hash not in manifest_by_hash:
+                detail = sample_details[sample_hash]
+                # Pool-backed rows represent user assets whose bytes must travel
+                # with the pattern. Pool-less default hashes can be built-in
+                # device samples and remain valid device references.
+                if detail["pool_slots"]:
+                    tracks = sorted(detail["default_tracks"] | detail["locked_tracks"])
+                    track_names = ", ".join(f"T{track + 1}" for track in tracks) or "unknown tracks"
+                    missing_assets.append(f"{sample_hash:08X} ({track_names})")
+                continue
             entry = manifest_by_hash[sample_hash]
             filename = str(entry.get("FileName", ""))
             if not filename or filename not in member_data:
@@ -712,6 +764,13 @@ class ProjectSession:
                 "filename": filename,
                 "data_base64": base64.b64encode(member_data[filename]).decode("ascii"),
             })
+        if missing_assets:
+            missing = ", ".join(missing_assets)
+            raise ValueError(
+                "cannot copy this Digitakt pattern because its sample-pool audio is not present "
+                f"in the source project archive: {missing}. Add the missing WAV asset to the "
+                "source project and retry."
+            )
         return additions
 
     def stage_song_file_restore(self, dst_slot: int, record: bytes) -> None:
