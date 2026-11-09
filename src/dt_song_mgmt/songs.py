@@ -284,7 +284,10 @@ tbody tr:hover td:not(.mutes) { background: #222; }
 def empty_song_template(raw: bytes, start: int) -> bytes:
     for i in range(SONG_SLOTS):
         rec = raw[start + i * SONG_SIZE : start + (i + 1) * SONG_SIZE]
-        if song_name(rec) == "EMPTY":
+        # Song names default to "EMPTY" when the name bytes are blank, but a
+        # user can also leave that name on a populated song. Only reuse a
+        # genuinely row-free slot as the empty template.
+        if song_name(rec) == "EMPTY" and song_row_count(rec) == 0:
             return rec
     rec = bytearray(SONG_SIZE)
     rec[SONG_TEMPO_OFF : SONG_TEMPO_OFF + 2] = b"\x38\x40"
