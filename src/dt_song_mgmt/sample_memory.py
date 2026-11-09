@@ -10,6 +10,8 @@ from .dt2_samples import pattern_sample_hashes
 DT2_SAMPLE_POOL_OFFSET = 0xDC871F
 DT2_SAMPLE_POOL_ROW_SIZE = 16
 DT2_SAMPLE_POOL_ROWS = 1024
+DT2_SAMPLE_RAM_LIMIT_BYTES = 400_000_000
+DT2_SAMPLE_SLOT_LIMIT = 1016
 
 
 def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
@@ -117,6 +119,7 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
         "unreferenced_sample_bytes": sum(samples[sample_hash]["size"] for sample_hash in set(samples) - set(used_by)),
         "shared_sample_count": sum(len(patterns_for_sample) > 1 for patterns_for_sample in used_by.values()),
         "sample_pool_count": sum(entry is not None for entry in pool),
+        "sample_pool_bytes": sum(entry["size"] for entry in pool if entry is not None),
         "pattern_error_count": len(pattern_errors),
     }
 
@@ -124,3 +127,14 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
 def format_bytes(size: int) -> str:
     """Format byte values in MiB for a readable TUI table."""
     return f"{size / (1024 * 1024):.2f} MiB"
+
+
+def format_project_ram(analysis: dict) -> str:
+    """Summarize pool-row sizes using decimal MB; device accounting is unverified."""
+    used = analysis["sample_pool_bytes"]
+    remaining = max(0, DT2_SAMPLE_RAM_LIMIT_BYTES - used)
+    return (
+        f"Estimated pool RAM: {used / 1_000_000:.1f} / 400 MB · "
+        f"~{remaining / 1_000_000:.1f} MB free · "
+        f"slots {analysis['sample_pool_count']} / {DT2_SAMPLE_SLOT_LIMIT:,}"
+    )

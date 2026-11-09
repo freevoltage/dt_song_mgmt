@@ -7,7 +7,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Static
 
-from .sample_memory import analyze_sample_memory, format_bytes
+from .sample_memory import analyze_sample_memory, format_bytes, format_project_ram
 from .songs import pattern_label
 
 
@@ -47,7 +47,8 @@ class SampleMemoryScreen(ModalScreen[None]):
         referenced = self.analysis["referenced_sample_bytes"]
         with Vertical(id="memory-window"):
             yield Static(
-                f"DIGITAKT II SAMPLE MEMORY · {format_bytes(total)} across "
+                f"{format_project_ram(self.analysis)}\n"
+                f"{format_bytes(total)} across "
                 f"{self.analysis['project_sample_count']} project samples · "
                 f"{format_bytes(referenced)} referenced by patterns",
                 id="memory-heading",
