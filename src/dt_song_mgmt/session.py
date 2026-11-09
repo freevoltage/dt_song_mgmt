@@ -841,16 +841,18 @@ class ProjectSession:
                 "filename": filename,
                 "data_base64": base64.b64encode(member_data[filename]).decode("ascii"),
             })
+        device_available_hashes: set[int] = set()
         if missing_by_hash and source_path is not None:
-            additions.extend(
+            library_additions, device_available_hashes = (
                 ProjectSession._nearby_digitakt_asset_additions(source_path, missing_by_hash)
             )
+            additions.extend(library_additions)
         available_hashes = {
             int(addition["entry"]["Hash"])
             for addition in additions
         }
         for sample_hash, detail in missing_by_hash.items():
-            if sample_hash in available_hashes:
+            if sample_hash in available_hashes or sample_hash in device_available_hashes:
                 continue
             tracks = sorted(detail["default_tracks"] | detail["locked_tracks"])
             track_names = ", ".join(f"T{track + 1}" for track in tracks) or "unknown tracks"
@@ -864,8 +866,11 @@ class ProjectSession:
         return additions
 
     @staticmethod
-    def _nearby_digitakt_asset_additions(source_path: Path, missing: dict[int, dict]) -> list[dict]:
-        """Find only requested sample hashes in nearby indexed Digitakt libraries."""
+    def _nearby_digitakt_asset_additions(
+        source_path: Path,
+        missing: dict[int, dict],
+    ) -> tuple[list[dict], set[int]]:
+        """Resolve requested samples from nearby libraries or installed factory references."""
         roots: list[Path] = []
         current = source_path.expanduser().resolve().parent
         for _depth in range(3):
@@ -916,6 +921,7 @@ class ProjectSession:
                     candidates.setdefault(sample_hash, []).append((root, relative))
 
         additions = []
+        device_available_hashes: set[int] = set()
         for sample_hash, paths in candidates.items():
             for root, relative in paths:
                 library_path = PurePosixPath(relative)
@@ -927,6 +933,9 @@ class ProjectSession:
                     wav_path.relative_to(root_resolved)
                     data = wav_path.read_bytes()
                 except (OSError, ValueError):
+                    if library_path.parts and library_path.parts[0].casefold() == "factory":
+                        device_available_hashes.add(sample_hash)
+                        break
                     continue
                 if not data:
                     continue
@@ -948,7 +957,7 @@ class ProjectSession:
                     "data_base64": base64.b64encode(data).decode("ascii"),
                 })
                 break
-        return additions
+        return additions, device_available_hashes
 
     def stage_song_file_restore(self, dst_slot: int, record: bytes) -> None:
         destination = self._song_slot(dst_slot, "destination")
