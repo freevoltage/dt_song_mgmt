@@ -30,11 +30,12 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
         try:
             sample_hash = int(item["Hash"])
             size = int(item["FileSize"])
-            name = str(item["FileName"]).rsplit("/", 1)[-1]
+            path = str(item["FileName"])
+            name = path.rsplit("/", 1)[-1]
         except (KeyError, TypeError, ValueError):
             continue
         if sample_hash >= 0 and size >= 0:
-            samples[sample_hash] = {"hash": sample_hash, "name": name, "size": size}
+            samples[sample_hash] = {"hash": sample_hash, "name": name, "path": path, "size": size, "size_known": True}
 
     pool: list[dict | None] = []
     for row in range(DT2_SAMPLE_POOL_ROWS):
@@ -52,7 +53,9 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
         samples[sample_hash] = {
             "hash": sample_hash,
             "name": manifest_entry.get("name", f"POOL {row + 1:03} · {sample_hash:08X}"),
+            "path": manifest_entry.get("path"),
             "size": manifest_entry.get("size", size),
+            "size_known": True,
         }
 
     pattern_samples: dict[int, set[int]] = defaultdict(set)
@@ -67,7 +70,10 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
             continue
         for sample_hash, detail in details.items():
             if sample_hash not in samples:
-                continue
+                samples[sample_hash] = {
+                    "hash": sample_hash, "name": f"REFERENCE · {sample_hash:08X}",
+                    "path": None, "size": 0, "size_known": False,
+                }
             pattern_samples[pattern_index].add(sample_hash)
             pattern_tracks[pattern_index][sample_hash].extend(detail["default_tracks"] | detail["locked_tracks"])
             if detail["locked_tracks"]:

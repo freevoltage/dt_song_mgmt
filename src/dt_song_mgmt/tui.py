@@ -640,6 +640,7 @@ class ProjectBrowser(App[None]):
         ("f2", "open_patterns", "Pattern manager"),
         ("f3", "open_sample_memory", "Sample memory"),
         ("f4", "open_song_pattern_overview", "Song pattern overview"),
+        ("f5", "open_sample_browser", "Sample browser"),
         ("ctrl+o", "open_project", "Open project"),
         ("ctrl+n", "new_project", "New empty project"),
         ("]", "next_project", "Next project"),
@@ -1844,6 +1845,18 @@ class ProjectBrowser(App[None]):
             return
         from .tui_song_patterns import SongPatternOverviewScreen
         self.push_screen(SongPatternOverviewScreen(self.session))
+
+    def action_open_sample_browser(self) -> None:
+        if self.session is None:
+            return
+        if self.session.device != "DT2":
+            self.notify("Sample browsing is available for Digitakt II projects", severity="warning")
+            return
+        from .tui_sample_browser import SampleBrowserScreen
+        try:
+            self.push_screen(SampleBrowserScreen(self.session))
+        except Exception as exc:
+            self.notify(f"Could not browse project samples: {exc}", severity="error", timeout=8)
 
     def _open_patterns(self, bank_filter: int | None) -> None:
         if self.session is None:

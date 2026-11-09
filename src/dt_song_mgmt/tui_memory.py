@@ -58,7 +58,7 @@ class SampleMemoryScreen(ModalScreen[None]):
                 f"Unreferenced project samples: {self.analysis['unreferenced_sample_count']} "
                 f"({format_bytes(self.analysis['unreferenced_sample_bytes'])}). "
                 f"Unresolved patterns: {self.analysis['pattern_error_count']}. "
-                "Pool-only assets may not be in this archive; sizes do not guarantee freed RAM.",
+                "Unknown sizes are excluded; reference sizes do not guarantee freed RAM.",
                 id="memory-note",
             )
             with Vertical(id="memory-columns"):
@@ -107,7 +107,7 @@ class SampleMemoryScreen(ModalScreen[None]):
                 sample["name"],
                 track_text,
                 str(sample["pattern_count"]),
-                format_bytes(sample["size"]),
+                format_bytes(sample["size"]) if sample.get("size_known", True) else "unknown",
                 "in archive" if sample["hash"] in self.archived_hashes else "reference only",
                 ("shared" if sample["shared"] else "unique") + (" · locked" if sample.get("sample_locked") else ""),
             )
