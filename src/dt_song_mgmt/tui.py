@@ -457,8 +457,9 @@ class ProjectBrowser(App[None]):
         ("g", "import_song_project", "Import song slot"),
         ("ctrl+e", "export_project_json", "Export project JSON"),
         ("ctrl+i", "import_project_json", "Restore project JSON"),
-        ("s", "save_project", "Save project as"),
-        ("ctrl+s", "save_project", "Save project as"),
+        ("s", "save_project", "Save project"),
+        ("ctrl+s", "save_project", "Save project"),
+        ("ctrl+shift+s", "save_project_as", "Save project as"),
         ("u", "undo_change", "Undo staged edit"),
         ("ctrl+y", "redo_change", "Redo staged edit"),
         ("f2", "open_patterns", "Pattern manager"),
@@ -517,7 +518,7 @@ class ProjectBrowser(App[None]):
         yield Static("", id="mute-display")
         yield Static(
             "↑↓ rows · ←/→ columns · Tab panes · brackets switch projects · Enter edits cell · Ctrl+N new project\n"
-            "Songs Y/X/P bundle · Rows c/m/d · filled = playing · outline = muted · s save",
+            "Songs Y/X/P bundle · Rows c/m/d · s save · Ctrl+Shift+S Save As",
             id="message",
         )
         yield Footer()
@@ -1718,6 +1719,17 @@ class ProjectBrowser(App[None]):
     def action_save_project(self) -> None:
         if self.session is None:
             return
+        if not self.session.is_new_project:
+            if not self.session.operations:
+                self.notify("No staged changes to save", severity="warning")
+                return
+            self._validate_and_confirm_save(self.session.path)
+            return
+        self.action_save_project_as()
+
+    def action_save_project_as(self) -> None:
+        if self.session is None:
+            return
         default_path = (
             self.session.suggested_save_path
             if self.session.is_new_project
@@ -1726,7 +1738,7 @@ class ProjectBrowser(App[None]):
         self.push_screen(
             EntryModal(
                 "Save project as",
-                "Choose a new project filename or full path. The original stays untouched.",
+                "Choose a project filename or full path. Existing destination files are backed up as .bak.",
                 str(default_path),
                 str(default_path),
             ),
@@ -1740,9 +1752,9 @@ class ProjectBrowser(App[None]):
         if not target.suffix:
             target = target.with_suffix(self.session.path.suffix)
         target = target.resolve()
-        if target == self.session.path and not self.session.is_new_project:
-            self.notify("Save As needs a new path; the source project is kept unchanged", severity="error")
-            return
+        self._validate_and_confirm_save(target)
+
+    def _validate_and_confirm_save(self, target: Path) -> None:
         if self.session is None:
             return
         checks = self.session.validate_save_as(target)
@@ -1752,7 +1764,9 @@ class ProjectBrowser(App[None]):
         )
 
     def _confirm_save_target(self, target: Path) -> None:
-        if target.exists():
+        if target.exists() and not (
+            self.session is not None and target == self.session.path and not self.session.is_new_project
+        ):
             self.push_screen(
                 ConfirmModal(
                     "Replace existing project?",
@@ -1767,6 +1781,7 @@ class ProjectBrowser(App[None]):
     def _write_save_as(self, target: Path) -> None:
         if self.session is None:
             return
+        in_place = target == self.session.path and not self.session.is_new_project
         try:
             saved_path = self.session.save_as(target)
         except Exception as exc:
@@ -1776,7 +1791,11 @@ class ProjectBrowser(App[None]):
         self.project_title = self.session.name or saved_path.name
         self._refresh_state()
         self._refresh_tab_labels()
-        self.notify(f"Saved project '{self.session.name}' to {saved_path}", timeout=10)
+        if in_place:
+            backup = saved_path.with_suffix(saved_path.suffix + ".bak")
+            self.notify(f"Saved project in place; backup: {backup}", timeout=10)
+        else:
+            self.notify(f"Saved project '{self.session.name}' to {saved_path}", timeout=10)
 
     def action_quit(self) -> None:
         dirty = [session for session in self.sessions if session.operations or session.is_new_project]

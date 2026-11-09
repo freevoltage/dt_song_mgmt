@@ -370,7 +370,7 @@ class ProjectSession:
         }
 
     def validate_save_as(self, destination: Path | str) -> list[dict]:
-        """Check a staged draft and its proposed Save As destination."""
+        """Validate a staged draft and the destination it will be written to."""
         target = Path(destination).expanduser().resolve()
         checks: list[dict] = []
 
@@ -385,12 +385,18 @@ class ProjectSession:
         )
         same_path = target == self.path and not self.is_new_project
         template_path = self.is_new_project and target == self._source_path
+        if template_path:
+            destination_detail = "Choose a different path; the project used as the template stays unchanged."
+        elif same_path:
+            destination_detail = "Save over the current project; a .bak copy will be kept."
+        elif not target.parent.is_dir():
+            destination_detail = f"Destination folder does not exist: {target.parent}"
+        else:
+            destination_detail = str(target)
         add(
             "Save destination",
-            "fail" if same_path or template_path or not target.parent.is_dir() else "pass",
-            "Choose a new path; the source project remains unchanged." if same_path or template_path else (
-                f"Destination folder does not exist: {target.parent}" if not target.parent.is_dir() else str(target)
-            ),
+            "fail" if template_path or not target.parent.is_dir() else "pass",
+            destination_detail,
         )
         try:
             unchanged = self._file_fingerprint() == self._fingerprint
@@ -402,7 +408,7 @@ class ProjectSession:
             "Source file is unchanged on disk." if unchanged else "Source file changed during this session; reload it before saving.",
         )
 
-        if not extension_ok or same_path or template_path or not target.parent.is_dir() or not unchanged:
+        if not extension_ok or template_path or not target.parent.is_dir() or not unchanged:
             return checks
 
         try:
@@ -1015,12 +1021,10 @@ class ProjectSession:
         return backup
 
     def save_as(self, destination: Path | str) -> Path:
-        """Write the staged project image to a new project file and continue there."""
+        """Write the staged image, keeping a backup if the destination exists."""
         target = Path(destination).expanduser().resolve()
-        if (target == self.path and not self.is_new_project) or (
-            self.is_new_project and target == self._source_path
-        ):
-            raise ValueError("choose a new path; the source project is kept unchanged")
+        if self.is_new_project and target == self._source_path:
+            raise ValueError("choose a different path; the project used as the template is kept unchanged")
         if target.suffix.lower() != self.path.suffix.lower():
             raise ValueError(f"project must keep its {self.path.suffix} device extension")
         if not target.parent.is_dir():
