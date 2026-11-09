@@ -11,7 +11,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Input, Label, Static, Tab, Tabs
+from textual.widgets import Button, Footer, Input, Label, OptionList, Static, Tab, Tabs
 
 from .constants import SONG_ROW_LABELS
 from .session import ProjectSession
@@ -68,6 +68,181 @@ class EntryModal(ModalScreen[str | None]):
             self.dismiss(self.query_one("#entry-input", Input).value)
         else:
             self.dismiss(None)
+
+
+class ProjectPickerModal(ModalScreen[Path | None]):
+    """Browse folders and select a Digitakt or Digitone project."""
+
+    CSS = """
+    ProjectPickerModal { align: center middle; background: #000000 70%; }
+    #project-picker-dialog {
+        width: 82;
+        max-width: 94%;
+        height: 70%;
+        max-height: 34;
+        min-height: 16;
+        padding: 1 2;
+        border: solid #c18a3c;
+        background: #111111;
+    }
+    #project-picker-title { height: 1; color: #dedbd2; text-style: bold; }
+    #project-picker-path { height: 1; color: #c18a3c; overflow: hidden; }
+    #project-picker-filter { height: 3; margin: 1 0 0 0; }
+    #project-picker-list { height: 1fr; border: none; scrollbar-color: #666666; }
+    #project-picker-hint { height: 2; color: #99958b; }
+    """
+    BINDINGS = [
+        ("escape", "cancel", "Close"),
+        ("backspace", "go_parent", "Parent folder"),
+        ("f", "focus_filter", "Filter"),
+        ("ctrl+l", "enter_path", "Enter path"),
+    ]
+
+    def __init__(self, start_directory: Path):
+        super().__init__()
+        self.directory = start_directory.expanduser().resolve()
+        self._entries: list[tuple[Path, bool]] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="project-picker-dialog"):
+            yield Static("OPEN PROJECT", id="project-picker-title")
+            yield Static("", id="project-picker-path")
+            yield Input(placeholder="Filter this folder's projects", id="project-picker-filter")
+            yield OptionList(id="project-picker-list", markup=False)
+            yield Static(
+                "↑/↓ browse · Enter open · Backspace parent · f filter · Ctrl+L path · Esc close",
+                id="project-picker-hint",
+            )
+
+    def on_mount(self) -> None:
+        self._refresh_entries()
+        self.query_one("#project-picker-list", OptionList).focus()
+
+    def _refresh_entries(self) -> None:
+        path_label = self.query_one("#project-picker-path", Static)
+        option_list = self.query_one("#project-picker-list", OptionList)
+        filter_text = self.query_one("#project-picker-filter", Input).value.strip().casefold()
+        path_label.update(str(self.directory))
+        old_highlight = option_list.highlighted
+        if old_highlight is None:
+            old_highlight = 0
+
+        try:
+            children = list(self.directory.iterdir())
+        except OSError as exc:
+            children = []
+            error = f"Cannot read this folder: {exc}"
+        else:
+            error = ""
+
+        directories = sorted(
+            (child for child in children if not child.name.startswith(".") and child.is_dir()),
+            key=lambda item: item.name.casefold(),
+        )
+        projects = sorted(
+            (
+                child for child in children
+                if not child.name.startswith(".")
+                and child.is_file()
+                and child.suffix.lower() in {".dt2prj", ".dn2prj"}
+            ),
+            key=lambda item: item.name.casefold(),
+        )
+        entries: list[tuple[Path, bool]] = []
+        if self.directory.parent != self.directory:
+            entries.append((self.directory.parent, True))
+        entries.extend((directory, True) for directory in directories)
+        entries.extend((project, False) for project in projects)
+        if filter_text:
+            entries = [entry for entry in entries if filter_text in entry[0].name.casefold()]
+        self._entries = entries
+
+        option_list.clear_options()
+        if error:
+            option_list.add_option(Text(error, style="bold red"))
+            option_list.disable_option_at_index(0)
+            return
+        if not entries:
+            message = "No matching projects or folders" if filter_text else "No project files in this folder"
+            option_list.add_option(Text(message, style="dim"))
+            option_list.disable_option_at_index(0)
+            return
+
+        for path, is_directory in entries:
+            label = Text()
+            if path == self.directory.parent and is_directory:
+                label.append("↑  ", style="bold #c18a3c")
+                label.append("..")
+            elif is_directory:
+                label.append("▸  ", style="bold #c18a3c")
+                label.append(path.name + "/")
+            else:
+                device = "DT2" if path.suffix.lower() == ".dt2prj" else "DN2"
+                label.append("   ")
+                label.append(path.name)
+                label.append(f"  [{device}]", style="dim")
+            option_list.add_option(label)
+        option_list.highlighted = min(max(old_highlight, 0), len(entries) - 1)
+
+    def on_input_changed(self, _event: Input.Changed) -> None:
+        self._refresh_entries()
+
+    def on_input_submitted(self, _event: Input.Submitted) -> None:
+        option_list = self.query_one("#project-picker-list", OptionList)
+        self._select_entry(option_list.highlighted)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self._select_entry(event.option_index)
+
+    def _select_entry(self, index: int | None) -> None:
+        if index is None or not 0 <= index < len(self._entries):
+            return
+        path, is_directory = self._entries[index]
+        if is_directory:
+            self.directory = path.resolve()
+            self.query_one("#project-picker-filter", Input).value = ""
+            self._refresh_entries()
+            self.query_one("#project-picker-list", OptionList).focus()
+        else:
+            self.dismiss(path.resolve())
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_go_parent(self) -> None:
+        parent = self.directory.parent
+        if parent != self.directory:
+            self.directory = parent
+            self.query_one("#project-picker-filter", Input).value = ""
+            self._refresh_entries()
+            self.query_one("#project-picker-list", OptionList).focus()
+
+    def action_focus_filter(self) -> None:
+        field = self.query_one("#project-picker-filter", Input)
+        field.focus()
+        field.cursor_position = len(field.value)
+
+    def action_enter_path(self) -> None:
+        self.app.push_screen(
+            EntryModal("Open project by path", "Enter a project file path or a folder to browse.", initial=str(self.directory)),
+            self._on_enter_path,
+        )
+
+    def _on_enter_path(self, value: str | None) -> None:
+        if value is None or not value.strip():
+            self.query_one("#project-picker-list", OptionList).focus()
+            return
+        target = Path(value.strip().strip('"')).expanduser().resolve()
+        if target.is_dir():
+            self.directory = target
+            self.query_one("#project-picker-filter", Input).value = ""
+            self._refresh_entries()
+            self.query_one("#project-picker-list", OptionList).focus()
+        elif target.is_file() and target.suffix.lower() in {".dt2prj", ".dn2prj"}:
+            self.dismiss(target)
+        else:
+            self.app.notify("Choose a folder or a .dt2prj / .dn2prj file", severity="error")
+            self.query_one("#project-picker-list", OptionList).focus()
 
 
 class SongPatternMappingModal(ModalScreen[list[dict] | None]):
@@ -517,7 +692,7 @@ class ProjectBrowser(App[None]):
                 yield Static("", id="row-detail")
         yield Static("", id="mute-display")
         yield Static(
-            "↑↓ rows · ←/→ columns · Tab panes · brackets switch projects · Enter edits cell · Ctrl+N new project\n"
+            "↑↓ rows · ←/→ columns · Tab panes · brackets switch projects · Ctrl+O open · Ctrl+N new\n"
             "Songs Y/X/P bundle · Rows c/m/d · s save · Ctrl+Shift+S Save As",
             id="message",
         )
@@ -697,10 +872,8 @@ class ProjectBrowser(App[None]):
                 tab.label = self._tab_label(session)
 
     def action_open_project(self) -> None:
-        self.push_screen(
-            EntryModal("Open project", "Enter a .dn2prj or .dt2prj file path."),
-            self._on_open_project,
-        )
+        start_directory = self.session.path.parent if self.session is not None else Path.cwd()
+        self.push_screen(ProjectPickerModal(start_directory), self._on_open_project)
 
     def action_new_project(self) -> None:
         if self.session is None:
@@ -720,10 +893,10 @@ class ProjectBrowser(App[None]):
         self._activate_project(tab_id, session)
         self.notify(f"Created an empty {session.device} project draft from {template_name}; press s to save it")
 
-    def _on_open_project(self, value: str | None) -> None:
-        if value is None or not value.strip():
+    def _on_open_project(self, selected_path: Path | None) -> None:
+        if selected_path is None:
             return
-        path = Path(value.strip()).expanduser().resolve()
+        path = selected_path.expanduser().resolve()
         for tab_id, session in self._tab_sessions.items():
             if not session.is_new_project and session.path == path:
                 tabs = self.query_one("#project-tabs", Tabs)
