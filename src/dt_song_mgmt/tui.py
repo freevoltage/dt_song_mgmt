@@ -124,8 +124,11 @@ class ProjectPickerModal(ModalScreen[Path | None]):
         filter_text = self.query_one("#project-picker-filter", Input).value.strip().casefold()
         path_label.update(str(self.directory))
         old_highlight = option_list.highlighted
-        if old_highlight is None:
-            old_highlight = 0
+        previous = (
+            self._entries[old_highlight][0]
+            if old_highlight is not None and 0 <= old_highlight < len(self._entries)
+            else None
+        )
 
         try:
             children = list(self.directory.iterdir())
@@ -149,10 +152,10 @@ class ProjectPickerModal(ModalScreen[Path | None]):
             key=lambda item: item.name.casefold(),
         )
         entries: list[tuple[Path, bool]] = []
+        entries.extend((project, False) for project in projects)
+        entries.extend((directory, True) for directory in directories)
         if self.directory.parent != self.directory:
             entries.append((self.directory.parent, True))
-        entries.extend((directory, True) for directory in directories)
-        entries.extend((project, False) for project in projects)
         if filter_text:
             entries = [
                 entry for entry in entries
@@ -175,17 +178,19 @@ class ProjectPickerModal(ModalScreen[Path | None]):
             label = Text()
             if path == self.directory.parent and is_directory:
                 label.append("↑  ", style="bold #c18a3c")
-                label.append("..")
+                label.append("..  (parent folder)")
             elif is_directory:
                 label.append("▸  ", style="bold #c18a3c")
+                label.append("FOLDER  ", style="dim")
                 label.append(path.name + "/")
             else:
                 device = "DT2" if path.suffix.lower() == ".dt2prj" else "DN2"
-                label.append("   ")
+                label.append(f"{device}  ", style="bold")
                 label.append(path.name)
-                label.append(f"  [{device}]", style="dim")
             option_list.add_option(label)
-        option_list.highlighted = min(max(old_highlight, 0), len(entries) - 1)
+        option_list.highlighted = next(
+            (index for index, (path, _) in enumerate(entries) if path == previous), 0
+        )
 
     def on_input_changed(self, _event: Input.Changed) -> None:
         self._refresh_entries()
