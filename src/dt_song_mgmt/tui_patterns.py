@@ -210,7 +210,8 @@ class PatternManagerScreen(ModalScreen[None]):
         bank_label = "ALL BANKS" if self.bank_filter is None else f"BANK {chr(ord('A') + self.bank_filter)}"
         clipboard = self._clipboard()
         draft_status = f"DRAFT {len(self.session.operations)}" if self.session.operations else "CLEAN"
-        project_line = f"{self.session.device} / {self.session.path.name}"
+        project_name = self.session.display_name if self.session.is_new_project else self.session.path.name
+        project_line = f"{self.session.device} / {project_name}"
         if clipboard:
             action = "CUT" if clipboard["mode"] == "cut" else "COPY"
             project_line += f" · {action} {pattern_label(clipboard['slot'])} ready"
@@ -471,6 +472,8 @@ class PatternManagerScreen(ModalScreen[None]):
             context.append(f"source remains used: {self._reference_summary(source_info)}")
         if destination_info["ref_count"]:
             context.append(f"destination users now play the pasted pattern: {self._reference_summary(destination_info)}")
+        if source_session is not self.session and self.session.device == "DT2":
+            context.append("Digitakt WAV assets and sample-lock pool slots staged with the pattern")
         if context:
             message += " · " + " · ".join(context)
         self.app.notify(message, timeout=10)
@@ -610,7 +613,7 @@ class PatternManagerScreen(ModalScreen[None]):
     def action_import_pattern(self) -> None:
         source_sessions = [item for item in self.sessions if item.path != self.session.path]
         sources = "\n".join(
-            f"{index + 1}: {item.path.name} ({item.device}, "
+            f"{index + 1}: {item.display_name if item.is_new_project else item.path.name} ({item.device}, "
             f"{'DRAFT ' + str(len(item.operations)) if item.operations else 'CLEAN'})"
             for index, item in enumerate(source_sessions)
         )
@@ -666,6 +669,8 @@ class PatternManagerScreen(ModalScreen[None]):
                 message += f" · source remains used: {self._reference_summary(source_info)}"
             if destination_info["ref_count"]:
                 message += f" · destination users now play the imported pattern: {self._reference_summary(destination_info)}"
+            if self.session.device == "DT2":
+                message += " · Digitakt WAV assets and sample-lock pool slots staged with the pattern"
             self.app.notify(message, timeout=10)
         except Exception as exc:
             self.app.notify(str(exc), severity="error", timeout=10)

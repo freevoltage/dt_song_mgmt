@@ -465,6 +465,7 @@ class ProjectBrowser(App[None]):
         ("f3", "open_sample_memory", "Sample memory"),
         ("f4", "open_song_pattern_overview", "Song pattern overview"),
         ("ctrl+o", "open_project", "Open project"),
+        ("ctrl+n", "new_project", "New empty project"),
         ("ctrl+tab", "next_project", "Next project"),
         ("ctrl+shift+tab", "previous_project", "Previous project"),
         ("1", "select_bank_a", "Bank A"),
@@ -515,7 +516,7 @@ class ProjectBrowser(App[None]):
                 yield Static("", id="row-detail")
         yield Static("", id="mute-display")
         yield Static(
-            "↑↓ move rows · ←/→ move columns · Tab / ← at Pattern returns to songs · Enter edits cell\n"
+            "↑↓ rows · ←/→ columns · Tab panes · Enter edits cell · Ctrl+N new project\n"
             "Songs Y/X/P bundle · Rows c/m/d · filled = playing · outline = muted · s save",
             id="message",
         )
@@ -575,9 +576,9 @@ class ProjectBrowser(App[None]):
                 source_patterns,
                 collect_pattern_names(source_raw),
                 collect_pattern_names(self.session.working_raw()),
-                source_session.path.name,
+                source_session.display_name if source_session.is_new_project else source_session.path.name,
                 source_slot,
-                self.session.path.name,
+                self.session.display_name if self.session.is_new_project else self.session.path.name,
                 destination_slot,
             ),
             lambda value: self._on_song_bundle_mapping(
@@ -621,12 +622,22 @@ class ProjectBrowser(App[None]):
             return
         if clipboard["mode"] == "cut":
             self._dsm_clipboard = None
+            sample_note = (
+                " Digitakt WAV assets and sample-lock slots were transferred."
+                if self.session.device == "DT2" else ""
+            )
             self.notify(
-                f"Moved song {source_slot:02d} to slot {destination_slot:02d}; both project drafts are staged. Press s to save each project."
+                f"Moved song {source_slot:02d} to slot {destination_slot:02d}; both project drafts are staged. "
+                f"Press s to save each project.{sample_note}"
             )
         else:
+            sample_note = (
+                " Digitakt WAV assets and sample-lock slots were transferred."
+                if self.session.device == "DT2" else ""
+            )
             self.notify(
                 f"Copied song {source_slot:02d} to slot {destination_slot:02d} with patterns; press s to save."
+                f"{sample_note}"
             )
         if self.session is not None:
             self._refresh_state()
@@ -662,17 +673,20 @@ class ProjectBrowser(App[None]):
         self._active_tab_id = tab_id
         self.session = session
         self.project_path = session.path
-        self.project_title = session.name or session.path.name
+        self.project_title = session.display_name if session.is_new_project else session.name or session.path.name
         self.device = session.device
         self.active_song_slot = 0
         self.active_row_index = None
+        self.active_row_column = 0
+        self.editing_label_idx = None
         self.selected_row_indices.clear()
         self._refresh_state()
 
     def _tab_label(self, session: ProjectSession) -> str:
         pending = len(session.operations)
-        marker = f"*{pending}" if pending else "clean"
-        return f"{session.path.name} [{session.device} {marker}]"
+        marker = "NEW" if session.is_new_project else (f"*{pending}" if pending else "clean")
+        name = session.display_name if session.is_new_project else session.path.name
+        return f"{name} [{session.device} {marker}]"
 
     def _refresh_tab_labels(self) -> None:
         tabs = self.query_one("#project-tabs", Tabs)
@@ -687,12 +701,30 @@ class ProjectBrowser(App[None]):
             self._on_open_project,
         )
 
+    def action_new_project(self) -> None:
+        if self.session is None:
+            return
+        try:
+            template_name = self.session.display_name
+            session = ProjectSession.empty_draft_from(self.session)
+        except Exception as exc:
+            self.notify(f"Could not create an empty project: {exc}", severity="error", timeout=10)
+            return
+        tab_id = f"project-{len(self._tab_sessions)}"
+        self.sessions.append(session)
+        self._tab_sessions[tab_id] = session
+        tabs = self.query_one("#project-tabs", Tabs)
+        tabs.add_tab(Tab(self._tab_label(session), id=tab_id))
+        tabs.active = tab_id
+        self._activate_project(tab_id, session)
+        self.notify(f"Created an empty {session.device} project draft from {template_name}; press s to save it")
+
     def _on_open_project(self, value: str | None) -> None:
         if value is None or not value.strip():
             return
         path = Path(value.strip()).expanduser().resolve()
         for tab_id, session in self._tab_sessions.items():
-            if session.path == path:
+            if not session.is_new_project and session.path == path:
                 tabs = self.query_one("#project-tabs", Tabs)
                 tabs.active = tab_id
                 self._activate_project(tab_id, session)
@@ -828,10 +860,12 @@ class ProjectBrowser(App[None]):
             if self.active_row_index is None and self.songs[self.active_song_slot]["rows"]:
                 self.active_row_index = 0
         pending = state["pending_changes"]
-        marker = f"DRAFT {pending}" if pending else "CLEAN"
-        self.query_one("#project-banner", Static).update(
-            f"{self.project_path.name}  ·  {self.project_title}"
-        )
+        marker = "NEW PROJECT" if self.session.is_new_project else (f"DRAFT {pending}" if pending else "CLEAN")
+        if self.session.is_new_project:
+            banner = f"{self.project_title}  ·  based on {self.session.template_label}"
+        else:
+            banner = f"{self.project_path.name}  ·  {self.project_title}"
+        self.query_one("#project-banner", Static).update(banner)
         self.query_one("#device-banner", Static).update(f"{self.device}  ·  {marker}")
         self._refresh_tab_labels()
         song_lines = Text()
@@ -1376,7 +1410,7 @@ class ProjectBrowser(App[None]):
             return
         source_sessions = [item for item in self.sessions if item.path != self.session.path]
         tabs = "\n".join(
-            f"{index + 1}: {item.path.name} ({item.device}, "
+            f"{index + 1}: {item.display_name if item.is_new_project else item.path.name} ({item.device}, "
             f"{'DRAFT ' + str(len(item.operations)) if item.operations else 'CLEAN'})"
             for index, item in enumerate(source_sessions)
         )
@@ -1684,8 +1718,10 @@ class ProjectBrowser(App[None]):
     def action_save_project(self) -> None:
         if self.session is None:
             return
-        default_path = self.session.path.with_name(
-            f"{self.session.path.stem}_edited{self.session.path.suffix}"
+        default_path = (
+            self.session.suggested_save_path
+            if self.session.is_new_project
+            else self.session.path.with_name(f"{self.session.path.stem}_edited{self.session.path.suffix}")
         )
         self.push_screen(
             EntryModal(
@@ -1704,7 +1740,7 @@ class ProjectBrowser(App[None]):
         if not target.suffix:
             target = target.with_suffix(self.session.path.suffix)
         target = target.resolve()
-        if target == self.session.path:
+        if target == self.session.path and not self.session.is_new_project:
             self.notify("Save As needs a new path; the source project is kept unchanged", severity="error")
             return
         if self.session is None:
@@ -1743,12 +1779,17 @@ class ProjectBrowser(App[None]):
         self.notify(f"Saved project '{self.session.name}' to {saved_path}", timeout=10)
 
     def action_quit(self) -> None:
-        dirty = [session for session in self.sessions if session.operations]
+        dirty = [session for session in self.sessions if session.operations or session.is_new_project]
         if not dirty:
             self.exit()
             return
         summary = "\n".join(
-            f"{session.path.name}: {len(session.operations)} staged change(s)"
+            f"{session.display_name if session.is_new_project else session.path.name}: "
+            + (
+                "new project draft not saved"
+                if session.is_new_project and not session.operations
+                else f"{len(session.operations)} staged change(s)"
+            )
             for session in dirty
         )
         self.push_screen(UnsavedExitModal(summary), self._on_exit_choice)

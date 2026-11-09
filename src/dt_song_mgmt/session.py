@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import shutil
+from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -66,7 +67,7 @@ class ProjectSession:
 
     def _file_fingerprint(self) -> tuple[int, int, int, int]:
         """Return a cheap signature for detecting edits from another session."""
-        stat = self.path.stat()
+        stat = getattr(self, "_source_path", self.path).stat()
         return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
 
     def _load(self) -> None:
@@ -74,7 +75,80 @@ class ProjectSession:
         self.head, self.base_raw = unpack_project(self.payload)
         self.name = payload_name(self.manifest)
         self.device = device_name(self.base_raw, self.path.suffix)
+        self._source_path = self.path
+        self.is_new_project = False
+        self.display_name = self.path.name
+        self.template_label = ""
+        self.suggested_save_path = self.path
         self._fingerprint = self._file_fingerprint()
+
+    @classmethod
+    def empty_draft_from(cls, template: "ProjectSession") -> "ProjectSession":
+        """Create an unsaved, empty project draft using an open project as its format template."""
+        if template.device not in {"DT2", "DN2"}:
+            raise ValueError("an open Digitakt II or Digitone II project is required as the format template")
+        draft = cls.__new__(cls)
+        template_raw = template.working_raw()
+        blank_raw = cls._empty_project_image(template_raw, template.device)
+        draft.path = template.path.with_name(f".dsm-draft-{uuid4().hex}{template.path.suffix}")
+        draft._source_path = template._source_path
+        draft._fingerprint = template._fingerprint
+        draft.is_new_project = True
+        device_label = "Digitakt II" if template.device == "DT2" else "Digitone II"
+        draft.display_name = f"New {device_label} Project"
+        draft.template_label = template.display_name
+        default_name = draft.display_name
+        suggested = template.path.with_name(f"{default_name}{template.path.suffix}")
+        suffix = 2
+        while suggested.exists():
+            suggested = template.path.with_name(f"{default_name} {suffix}{template.path.suffix}")
+            suffix += 1
+        draft.suggested_save_path = suggested
+        draft.members = template.working_members()
+        sample_hashes = [
+            cls._entry_hash(entry)
+            for entry in cls._manifest_entries(draft.members)
+        ]
+        draft.members = apply_asset_delta(draft.members, removals=sample_hashes)
+        manifest_data = next(
+            data for info, data in draft.members if info.filename == "manifest.json"
+        )
+        draft.manifest = json.loads(manifest_data)
+        draft.head = template.head
+        draft.base_raw = blank_raw
+        draft.payload = pack_project(draft.head, blank_raw)
+        draft.name = template.name
+        draft.device = template.device
+        draft.operations = []
+        draft.redo_operations = []
+        return draft
+
+    @staticmethod
+    def _empty_project_image(raw: bytes, device: str) -> bytes:
+        patched = bytearray(raw)
+        pattern_block = bytes(PATTERN_STRIDE)
+        kit_size = kit_stride(raw)
+        kit_block = bytes(kit_size)
+        for pattern_index in range(PATTERN_SLOTS):
+            pattern_start = PATTERN_BASE + pattern_index * PATTERN_STRIDE
+            kit_start = KIT_BASE + pattern_index * kit_size
+            if pattern_start + PATTERN_STRIDE > len(patched) or kit_start + kit_size > len(patched):
+                raise ValueError("project image is too short to create an empty project")
+            patched[pattern_start:pattern_start + PATTERN_STRIDE] = pattern_block
+            patched[kit_start:kit_start + kit_size] = kit_block
+        blank = bytes(patched)
+        empty_song = empty_song_template(blank, song_table_off(blank))
+        blank = set_song_slots(blank, [empty_song] * SONG_SLOTS)
+        if device == "DT2":
+            from .dt2_samples import clear_sample_pool_hashes, sample_pool_rows
+            pool_hashes = {
+                row.sample_hash
+                for row in sample_pool_rows(blank)
+                if row is not None
+            }
+            if pool_hashes:
+                blank = clear_sample_pool_hashes(blank, pool_hashes)
+        return blank
 
     def stage(self, operation: dict) -> None:
         """Append one operation after validating the resulting working image."""
@@ -288,7 +362,7 @@ class ProjectSession:
         raw = self.working_raw()
         return {
             "project_name": self.name,
-            "project_file": self.path.name,
+            "project_file": self.display_name if self.is_new_project else self.path.name,
             "device": self.device,
             "songs": get_all_songs_info(raw),
             "patterns": get_all_patterns_info(raw),
@@ -309,11 +383,12 @@ class ProjectSession:
             "pass" if extension_ok else "fail",
             f"{target.suffix or '(none)'} matches {self.path.suffix}" if extension_ok else f"Keep the {self.path.suffix} extension for this device.",
         )
-        same_path = target == self.path
+        same_path = target == self.path and not self.is_new_project
+        template_path = self.is_new_project and target == self._source_path
         add(
             "Save destination",
-            "fail" if same_path or not target.parent.is_dir() else "pass",
-            "Choose a new path; the source project remains unchanged." if same_path else (
+            "fail" if same_path or template_path or not target.parent.is_dir() else "pass",
+            "Choose a new path; the source project remains unchanged." if same_path or template_path else (
                 f"Destination folder does not exist: {target.parent}" if not target.parent.is_dir() else str(target)
             ),
         )
@@ -327,7 +402,7 @@ class ProjectSession:
             "Source file is unchanged on disk." if unchanged else "Source file changed during this session; reload it before saving.",
         )
 
-        if not extension_ok or same_path or not target.parent.is_dir() or not unchanged:
+        if not extension_ok or same_path or template_path or not target.parent.is_dir() or not unchanged:
             return checks
 
         try:
@@ -505,7 +580,7 @@ class ProjectSession:
         return {
             "backup_format": "dsm-project-state",
             "version": 1,
-            "project_file": self.path.name,
+            "project_file": self.display_name if self.is_new_project else self.path.name,
             "project_name": self.name,
             "device": self.device,
             "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -811,6 +886,8 @@ class ProjectSession:
 
     def apply(self) -> Path:
         """Back up and atomically write the current draft to its project file."""
+        if self.is_new_project:
+            raise ValueError("a new project must be saved to a new project path")
         if not self.operations:
             raise ValueError("there are no staged changes to apply")
         if self._file_fingerprint() != self._fingerprint:
@@ -829,7 +906,9 @@ class ProjectSession:
     def save_as(self, destination: Path | str) -> Path:
         """Write the staged project image to a new project file and continue there."""
         target = Path(destination).expanduser().resolve()
-        if target == self.path:
+        if (target == self.path and not self.is_new_project) or (
+            self.is_new_project and target == self._source_path
+        ):
             raise ValueError("choose a new path; the source project is kept unchanged")
         if target.suffix.lower() != self.path.suffix.lower():
             raise ValueError(f"project must keep its {self.path.suffix} device extension")
