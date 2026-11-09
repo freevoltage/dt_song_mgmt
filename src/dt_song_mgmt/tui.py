@@ -154,7 +154,10 @@ class ProjectPickerModal(ModalScreen[Path | None]):
         entries.extend((directory, True) for directory in directories)
         entries.extend((project, False) for project in projects)
         if filter_text:
-            entries = [entry for entry in entries if filter_text in entry[0].name.casefold()]
+            entries = [
+                entry for entry in entries
+                if entry[0] != self.directory.parent and filter_text in entry[0].name.casefold()
+            ]
         self._entries = entries
 
         option_list.clear_options()
@@ -186,6 +189,16 @@ class ProjectPickerModal(ModalScreen[Path | None]):
 
     def on_input_changed(self, _event: Input.Changed) -> None:
         self._refresh_entries()
+
+    def on_key(self, event) -> None:
+        if self.focused is self.query_one("#project-picker-filter", Input) and event.key in {"up", "down"}:
+            option_list = self.query_one("#project-picker-list", OptionList)
+            option_list.focus()
+            if event.key == "up":
+                option_list.action_cursor_up()
+            else:
+                option_list.action_cursor_down()
+            event.stop()
 
     def on_input_submitted(self, _event: Input.Submitted) -> None:
         option_list = self.query_one("#project-picker-list", OptionList)
@@ -656,10 +669,10 @@ class ProjectBrowser(App[None]):
         ("0", "select_all_banks", "All banks"),
     ]
 
-    def __init__(self, project_path: Path | str) -> None:
+    def __init__(self, project_path: Path | str | None = None) -> None:
         super().__init__()
-        self.project_path = Path(project_path).expanduser().resolve()
-        self.project_title = self.project_path.name
+        self.project_path = Path(project_path).expanduser().resolve() if project_path is not None else None
+        self.project_title = self.project_path.name if self.project_path else "Choose a project"
         self.device = "Unknown device"
         self.songs: list[dict] = []
         self.pattern_names: list[str] = []
@@ -678,7 +691,7 @@ class ProjectBrowser(App[None]):
         with Horizontal(id="project-header"):
             yield Static("Loading project…", id="project-banner")
             yield Static("", id="device-banner")
-        yield Tabs(Tab(self.project_path.name, id="project-0"), id="project-tabs")
+        yield Tabs(Tab(self.project_path.name if self.project_path else "Choose a project", id="project-0"), id="project-tabs")
         with Horizontal(id="workspace"):
             with Vertical(id="songs-pane"):
                 yield Static("SONGS", id="songs-title", classes="pane-title")
@@ -820,6 +833,24 @@ class ProjectBrowser(App[None]):
             self._refresh_state()
 
     def on_mount(self) -> None:
+        if self.project_path is None:
+            self.query_one("#project-banner", Static).update("Choose a project to open")
+            self.push_screen(ProjectPickerModal(Path.cwd()), self._on_startup_project)
+            return
+        self._load_initial_project()
+
+    def _on_startup_project(self, path: Path | None) -> None:
+        if path is None:
+            self.exit()
+            return
+        self.project_path = path
+        if not self._load_initial_project():
+            self.project_path = None
+            self.push_screen(ProjectPickerModal(path.parent), self._on_startup_project)
+
+    def _load_initial_project(self) -> bool:
+        if self.project_path is None:
+            return False
         try:
             self.session = ProjectSession(self.project_path)
             self.sessions = [self.session]
@@ -833,11 +864,13 @@ class ProjectBrowser(App[None]):
             self.query_one("#project-banner", Static).update(
                 f"Could not open {self.project_path.name}: {exc}"
             )
-            return
+            self.notify(f"Could not open project: {exc}", severity="error", timeout=10)
+            return False
 
         self._refresh_state()
         self.query_one("#songs-list", NavigatorList).focus()
         self._refresh_pane_titles()
+        return True
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
         if event.tab is None:
@@ -2007,6 +2040,6 @@ class ProjectBrowser(App[None]):
                 session.discard()
             self.exit()
             return
-def run_tui(project_path: Path | str) -> None:
+def run_tui(project_path: Path | str | None = None) -> None:
     """Start the terminal project browser for ``project_path``."""
     ProjectBrowser(project_path).run()

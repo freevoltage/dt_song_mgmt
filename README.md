@@ -60,13 +60,19 @@ If that port is occupied, DSM reports the conflict and exits. Each running proje
 
 ## Terminal interface
 
-Open a project in the Textual terminal interface:
+Start the Textual terminal interface and choose a project in the picker:
+
+```bash
+dsm
+```
+
+`dsm tui` does the same thing. The picker starts in the current working directory. You can also open a project directly:
 
 ```bash
 dsm "DN2 YEAR 2026 2.dn2prj" tui
 ```
 
-Run that from the directory containing the project file. For a project elsewhere, pass its full path:
+Run that from the directory containing the project file. For a project elsewhere, you can pass its full path:
 
 ```bash
 dsm "/path/to/DN2 YEAR 2026 2.dn2prj" tui

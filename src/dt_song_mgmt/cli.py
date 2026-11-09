@@ -12,10 +12,14 @@ from . import dump_songs, restore_songs
 def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
-    if not argv or argv[0] in ("-h", "--help"):
+    if not argv or argv == ["tui"]:
+        from .tui import run_tui
+        run_tui()
+        return
+    if argv[0] in ("-h", "--help"):
         print("Elektron Digi Song Mode Manager (dsm)", file=sys.stderr)
-        print("Usage: dsm <project> [tui|info|rows|restore|web] ... | dsm launch | dsm stop", file=sys.stderr)
-        raise SystemExit(0 if argv and argv[0] in ("-h", "--help") else 2)
+        print("Usage: dsm [tui] | dsm <project> [tui|info|rows|restore|web] ... | dsm launch | dsm stop", file=sys.stderr)
+        raise SystemExit(0)
 
     if argv[0] == "launch":
         from .launcher import launch
