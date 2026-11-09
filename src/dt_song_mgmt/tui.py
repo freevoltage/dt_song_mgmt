@@ -98,14 +98,15 @@ class ProjectPickerModal(ModalScreen[Path | None]):
         ("ctrl+l", "enter_path", "Enter path"),
     ]
 
-    def __init__(self, start_directory: Path):
+    def __init__(self, start_directory: Path, title: str = "OPEN PROJECT"):
         super().__init__()
         self.directory = start_directory.expanduser().resolve()
+        self.title_text = title
         self._entries: list[tuple[Path, bool]] = []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="project-picker-dialog"):
-            yield Static("OPEN PROJECT", id="project-picker-title")
+            yield Static(self.title_text, id="project-picker-title")
             yield Static("", id="project-picker-path")
             yield Input(placeholder="Filter this folder's projects", id="project-picker-filter")
             yield OptionList(id="project-picker-list", markup=False)
@@ -839,19 +840,10 @@ class ProjectBrowser(App[None]):
 
     def on_mount(self) -> None:
         if self.project_path is None:
-            self.query_one("#project-banner", Static).update("Choose a project to open")
-            self.push_screen(ProjectPickerModal(Path.cwd()), self._on_startup_project)
+            self.query_one("#project-banner", Static).update("No project open · Ctrl+O open · Ctrl+N new")
+            self.query_one("#songs-list", NavigatorList).focus()
             return
         self._load_initial_project()
-
-    def _on_startup_project(self, path: Path | None) -> None:
-        if path is None:
-            self.exit()
-            return
-        self.project_path = path
-        if not self._load_initial_project():
-            self.project_path = None
-            self.push_screen(ProjectPickerModal(path.parent), self._on_startup_project)
 
     def _load_initial_project(self) -> bool:
         if self.project_path is None:
@@ -916,20 +908,31 @@ class ProjectBrowser(App[None]):
 
     def action_new_project(self) -> None:
         if self.session is None:
+            self.push_screen(
+                ProjectPickerModal(Path.cwd(), "SELECT AN EXISTING PROJECT AS DEVICE TEMPLATE"),
+                self._on_new_project_template,
+            )
+            return
+        self._create_project_draft(self.session)
+
+    def _on_new_project_template(self, path: Path | None) -> None:
+        if path is None:
             return
         try:
-            template_name = self.session.display_name
-            session = ProjectSession.empty_draft_from(self.session)
+            template = ProjectSession(path)
+        except Exception as exc:
+            self.notify(f"Could not open project template: {exc}", severity="error", timeout=10)
+            return
+        self._create_project_draft(template)
+
+    def _create_project_draft(self, template: ProjectSession) -> None:
+        try:
+            session = ProjectSession.empty_draft_from(template)
         except Exception as exc:
             self.notify(f"Could not create an empty project: {exc}", severity="error", timeout=10)
             return
-        tab_id = f"project-{len(self._tab_sessions)}"
-        self.sessions.append(session)
-        self._tab_sessions[tab_id] = session
-        tabs = self.query_one("#project-tabs", Tabs)
-        tabs.add_tab(Tab(self._tab_label(session), id=tab_id))
-        tabs.active = tab_id
-        self._activate_project(tab_id, session)
+        template_name = template.display_name
+        self._add_project_session(session)
         self.notify(f"Created an empty {session.device} project draft from {template_name}; press s to save it")
 
     def _on_open_project(self, selected_path: Path | None) -> None:
@@ -947,11 +950,18 @@ class ProjectBrowser(App[None]):
         except Exception as exc:
             self.notify(f"Could not open project: {exc}", severity="error", timeout=10)
             return
+        self._add_project_session(session)
+
+    def _add_project_session(self, session: ProjectSession) -> None:
+        first = not self._tab_sessions
         tab_id = f"project-{len(self._tab_sessions)}"
         self.sessions.append(session)
         self._tab_sessions[tab_id] = session
         tabs = self.query_one("#project-tabs", Tabs)
-        tabs.add_tab(Tab(self._tab_label(session), id=tab_id))
+        if first:
+            tabs.get_tab(tab_id).label = self._tab_label(session)
+        else:
+            tabs.add_tab(Tab(self._tab_label(session), id=tab_id))
         tabs.active = tab_id
         self._activate_project(tab_id, session)
 

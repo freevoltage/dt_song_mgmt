@@ -11,7 +11,7 @@ from dt_song_mgmt.cli import main
 
 
 class CliStartupTests(unittest.TestCase):
-    def test_empty_and_tui_commands_open_picker(self):
+    def test_empty_and_tui_commands_start_tui(self):
         tui = types.ModuleType("dt_song_mgmt.tui")
         tui.run_tui = Mock()
         with patch.dict(sys.modules, {"dt_song_mgmt.tui": tui}):

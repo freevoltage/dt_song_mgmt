@@ -60,13 +60,13 @@ If that port is occupied, DSM reports the conflict and exits. Each running proje
 
 ## Terminal interface
 
-Start the Textual terminal interface and choose a project in the picker:
+Start the Textual terminal interface:
 
 ```bash
 dsm
 ```
 
-`dsm tui` does the same thing. The picker starts in the current working directory. You can also open a project directly:
+`dsm tui` does the same thing. From the empty workspace, press `Ctrl+O` to browse for a project or `Ctrl+N` to create an empty draft. Creating a draft asks you to select an existing project as a device-format template; it does not open that template as a project tab. The picker starts in the current working directory. You can also open a project directly:
 
 ```bash
 dsm "DN2 YEAR 2026 2.dn2prj" tui

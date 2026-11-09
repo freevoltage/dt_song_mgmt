@@ -7,7 +7,7 @@ from pathlib import Path
 from textual.app import App
 from textual.widgets import OptionList
 
-from dt_song_mgmt.tui import ProjectPickerModal
+from dt_song_mgmt.tui import ProjectBrowser, ProjectPickerModal
 
 
 class PickerApp(App):
@@ -24,6 +24,21 @@ class PickerApp(App):
 
 
 class ProjectPickerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_workspace_can_start_new_draft_without_opening_project(self):
+        app = ProjectBrowser()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            self.assertIsNone(app.session)
+            self.assertNotIsInstance(app.screen, ProjectPickerModal)
+            await pilot.press("ctrl+n")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ProjectPickerModal)
+            self.assertIn("TEMPLATE", app.screen.title_text)
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertIsNone(app.session)
+            self.assertNotIsInstance(app.screen, ProjectPickerModal)
+
     async def test_enter_opens_project_ahead_of_extracted_folder(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
