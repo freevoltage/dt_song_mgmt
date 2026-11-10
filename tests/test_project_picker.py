@@ -24,6 +24,20 @@ class PickerApp(App):
 
 
 class ProjectPickerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_escape_does_not_quit_workspace_or_after_closing_picker(self):
+        app = ProjectBrowser()
+        async with app.run_test() as pilot:
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertTrue(app.is_running)
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ProjectPickerModal)
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertTrue(app.is_running)
+            self.assertNotIsInstance(app.screen, ProjectPickerModal)
+
     async def test_empty_workspace_can_start_new_draft_without_opening_project(self):
         app = ProjectBrowser()
         async with app.run_test() as pilot:

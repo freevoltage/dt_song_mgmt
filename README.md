@@ -66,7 +66,7 @@ Start the Textual terminal interface:
 dsm
 ```
 
-`dsm tui` does the same thing. From the empty workspace, press `Ctrl+O` to browse for a project or `Ctrl+N` to create an empty draft. Creating a draft asks you to select an existing project as a device-format template; it does not open that template as a project tab. The picker starts in the current working directory. You can also open a project directly:
+`dsm tui` does the same thing. From the empty workspace, press `Ctrl+O` to browse for a project or `Ctrl+N` to create an empty draft. Creating a draft asks you to select an existing project as a device-format template; it does not open that template as a project tab. The picker starts in the current working directory. Use `q` to quit; `Esc` closes dialogs or cancels the current edit. You can also open a project directly:
 
 ```bash
 dsm "DN2 YEAR 2026 2.dn2prj" tui

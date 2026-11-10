@@ -661,7 +661,6 @@ class ProjectBrowser(App[None]):
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
-        ("escape", "quit", "Quit"),
         ("tab", "switch_pane", "Switch pane"),
         ("enter", "focus_song_rows", "Open / edit row"),
         ("space", "toggle_row_selection", "Select row"),
