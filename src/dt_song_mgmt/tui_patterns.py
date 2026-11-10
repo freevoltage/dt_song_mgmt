@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static
 
 from .patterns import get_all_patterns_info
+from .pattern_steps import pattern_trigs
 from .songs import pattern_label
 
 
@@ -103,6 +104,10 @@ class PatternList(Static):
         ("pagedown", "move(12)", "Page down"),
         ("home", "first", "First pattern"),
         ("end", "last", "Last pattern"),
+        ("left", "preview_page(-1)", "Previous step page"),
+        ("right", "preview_page(1)", "Next step page"),
+        ("ctrl+up", "preview_scroll(-3)", "Scroll preview up"),
+        ("ctrl+down", "preview_scroll(3)", "Scroll preview down"),
     ]
 
     def action_move(self, delta: int) -> None:
@@ -113,6 +118,13 @@ class PatternList(Static):
 
     def action_last(self) -> None:
         self.screen.action_select_last_pattern()
+
+    def action_preview_page(self, delta: int) -> None:
+        self.screen.change_preview_page(delta)
+
+    def action_preview_scroll(self, delta: int) -> None:
+        if self.screen.preview_visible:
+            self.screen.query_one("#pattern-preview", VerticalScroll).scroll_relative(y=delta, animate=False)
 
 
 class PatternManagerScreen(ModalScreen[None]):
@@ -129,6 +141,10 @@ class PatternManagerScreen(ModalScreen[None]):
     #pattern-bank-title { height: 1; text-style: bold; }
     #pattern-banks { height: auto; }
     #pattern-results { width: 1fr; padding-left: 1; }
+    #pattern-preview { display: none; width: 30; border-left: solid $panel; padding: 0 1; }
+    #pattern-preview-grid { height: auto; }
+    PatternManagerScreen.preview-visible #pattern-preview { display: block; }
+    PatternManagerScreen.preview-visible.compact #pattern-bank-pane { display: none; }
     #pattern-count { height: 1; }
     #pattern-search { height: 3; margin: 1 0; }
     #pattern-columns { height: 1; }
@@ -164,6 +180,7 @@ class PatternManagerScreen(ModalScreen[None]):
         ("d", "clear_pattern", "Clear"),
         ("r", "rename_pattern", "Rename"),
         ("i", "import_pattern", "Import"),
+        ("v", "toggle_preview", "Sequencer"),
     ]
 
     def __init__(self, session, sessions=None, bank_filter: int | None = None, clipboard_owner=None):
@@ -175,6 +192,8 @@ class PatternManagerScreen(ModalScreen[None]):
         self.filter_text = ""
         self.bank_filter = bank_filter
         self._visible_patterns: list[dict] = []
+        self.preview_visible = False
+        self.preview_page = 0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="pattern-workspace"):
@@ -191,9 +210,11 @@ class PatternManagerScreen(ModalScreen[None]):
                     yield Static("    SLOT  SONG   PATTERN NAME", id="pattern-columns")
                     with VerticalScroll(id="pattern-scroll"):
                         yield PatternList("", id="pattern-list")
+                with VerticalScroll(id="pattern-preview"):
+                    yield Static("", id="pattern-preview-grid")
             yield Static("", id="pattern-selection")
             yield Static(
-                "↑/↓ browse · PgUp/PgDn jump · Home/End · 1–8 banks · 0 all · / filter · Enter return\n"
+                "↑/↓ browse · 1–8 banks · 0 all · / filter · v sequencer · ←/→ steps\n"
                 "c copy · m move · d clear · r rename · i import · y copy · x cut · p paste · Esc back",
                 id="pattern-help",
             )
@@ -202,6 +223,9 @@ class PatternManagerScreen(ModalScreen[None]):
         pattern_list = self.query_one("#pattern-list", PatternList)
         self._refresh_view()
         pattern_list.focus()
+
+    def on_resize(self, event) -> None:
+        self.set_class(event.size.width < 76, "compact")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "pattern-search":
@@ -213,7 +237,8 @@ class PatternManagerScreen(ModalScreen[None]):
             self.query_one("#pattern-list", PatternList).focus()
 
     def _refresh_view(self) -> None:
-        all_patterns = get_all_patterns_info(self.session.working_raw())
+        raw = self.session.working_raw()
+        all_patterns = get_all_patterns_info(raw)
         patterns = all_patterns
         if self.bank_filter is not None:
             patterns = [pattern for pattern in patterns if pattern["index"] // 16 == self.bank_filter]
@@ -267,6 +292,43 @@ class PatternManagerScreen(ModalScreen[None]):
                 y=selected_row, animate=False, force=True
             )
         self._refresh_selection()
+        if self.preview_visible:
+            self._refresh_preview(raw)
+
+    def action_toggle_preview(self) -> None:
+        self.preview_visible = not self.preview_visible
+        self.set_class(self.preview_visible, "preview-visible")
+        self._refresh_view()
+
+    def change_preview_page(self, delta: int) -> None:
+        if not self.preview_visible:
+            return
+        self.preview_page = max(0, min(7, self.preview_page + delta))
+        self._refresh_preview(self.session.working_raw())
+
+    def _refresh_preview(self, raw: bytes) -> None:
+        output = Text()
+        if not self._visible_patterns:
+            output.append("No pattern selected.")
+        else:
+            try:
+                tracks = pattern_trigs(raw, self.selected_pattern, self.session.device)
+            except ValueError as exc:
+                output.append(f"Cannot read trigs: {exc}")
+            else:
+                start = self.preview_page * 16
+                output.append(f"{pattern_label(self.selected_pattern)}  STEPS {start + 1:03}–{start + 16:03}\n", style="bold")
+                output.append("     " + "  ".join(f"{start + n:03}" for n in (1, 5, 9, 13)) + "\n", style="dim")
+                for index, steps in enumerate(tracks):
+                    output.append(f"T{index + 1:02}  ")
+                    for step in range(16):
+                        active = steps[start + step]
+                        output.append("●" if active else "·", style="bold" if active else "dim")
+                        if step % 4 == 3 and step != 15:
+                            output.append(" ")
+                    output.append("\n")
+                output.append("\n←/→ page · Ctrl+↑/↓ scroll\nSong-row mutes not shown", style="dim")
+        self.query_one("#pattern-preview-grid", Static).update(output)
 
     def _refresh_selection(self) -> None:
         if not self.is_mounted:

@@ -8,20 +8,49 @@ from unittest.mock import patch
 from textual.app import App
 from textual.widgets import Static
 
+from dt_song_mgmt.constants import PATTERN_BASE, PATTERN_STRIDE
 from dt_song_mgmt.songs import pattern_label
 from dt_song_mgmt.tui_patterns import PatternManagerScreen
 
 
 class PatternApp(App):
+    def __init__(self, raw=b""):
+        super().__init__()
+        self.raw = raw
+
     def on_mount(self):
         session = SimpleNamespace(
-            working_raw=lambda: b"", path=Path("test.dt2prj"),
+            working_raw=lambda: self.raw, path=Path("test.dt2prj"),
             is_new_project=False, device="DT2", operations=[],
         )
         self.push_screen(PatternManagerScreen(session))
 
 
 class PatternNavigationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_optional_preview_follows_pattern_and_pages(self):
+        raw = bytearray(PATTERN_BASE + PATTERN_STRIDE)
+        for step in (0, 4, 8, 12):
+            offset = PATTERN_BASE + 4 + 2 * step
+            raw[offset:offset + 2] = b"\x03\x81"
+        patterns = [
+            {"index": i, "label": pattern_label(i), "name": "", "ref_count": 0, "references": []}
+            for i in range(128)
+        ]
+        with patch("dt_song_mgmt.tui_patterns.get_all_patterns_info", return_value=patterns):
+            app = PatternApp(bytes(raw))
+            async with app.run_test(size=(55, 30)) as pilot:
+                await pilot.press("v")
+                await pilot.pause()
+                screen = app.screen
+                self.assertTrue(screen.preview_visible)
+                text = str(screen.query_one("#pattern-preview-grid", Static).render())
+                self.assertIn("A01  STEPS 001–016", text)
+                self.assertEqual(text.splitlines()[2].count("●"), 4)
+                await pilot.press("right")
+                self.assertIn("STEPS 017–032", str(screen.query_one("#pattern-preview-grid", Static).render()))
+                await pilot.press("v")
+                self.assertFalse(screen.preview_visible)
+
     async def test_song_use_stays_visible_in_narrow_pattern_list(self):
         patterns = [
             {"index": i, "label": pattern_label(i), "name": "FROSCH" if i == 16 else "",
