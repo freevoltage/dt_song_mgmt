@@ -1407,12 +1407,9 @@ class ProjectBrowser(App[None]):
         index = self.active_row_index
         if index in self.selected_row_indices:
             self.selected_row_indices.remove(index)
-            message = f"Row {index + 1} removed from selection"
         else:
             self.selected_row_indices.add(index)
-            message = f"Row {index + 1} selected ({len(self.selected_row_indices)} total)"
         self._show_song(self.active_song_slot)
-        self.notify(message)
 
     def _stage_row_update(self, updates: dict, success_message: str) -> None:
         indices = self._active_row_indices()
