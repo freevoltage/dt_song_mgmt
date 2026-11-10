@@ -228,6 +228,23 @@ class ProjectSession:
                 slots = get_song_slots(raw)
                 slots[destination] = record
                 raw = set_song_slots(raw, slots)
+            elif op_type == "song_arrangement_paste":
+                destination = self._song_slot(operation.get("dst_slot"), "destination")
+                try:
+                    record = base64.b64decode(operation["song_data"], validate=True)
+                except (KeyError, ValueError, TypeError):
+                    raise ValueError("song arrangement data is missing or invalid") from None
+                if len(record) != SONG_SIZE:
+                    raise ValueError(f"song arrangement must be exactly {SONG_SIZE} bytes")
+                slots = get_song_slots(raw)
+                source_slot = operation.get("clear_source_slot")
+                if source_slot is not None:
+                    source_slot = self._song_slot(source_slot, "source")
+                    if source_slot == destination:
+                        raise ValueError("choose a different destination song slot")
+                    slots[source_slot] = empty_song_template(raw, song_table_off(raw))
+                slots[destination] = record
+                raw = set_song_slots(raw, slots)
             elif op_type == "song_import":
                 source_path = Path(operation["src_path"]).expanduser().resolve()
                 if source_path == self.path:
@@ -988,6 +1005,21 @@ class ProjectSession:
             "dst_slot": destination,
             "song_data": base64.b64encode(record).decode("ascii"),
         })
+
+    def stage_song_arrangement_paste(
+        self, dst_slot: int, record: bytes, clear_source_slot: int | None = None,
+    ) -> None:
+        """Paste one song record, optionally clearing its source in the same draft."""
+        destination = self._song_slot(dst_slot, "destination")
+        if len(record) != SONG_SIZE:
+            raise ValueError(f"song arrangement must be exactly {SONG_SIZE} bytes")
+        operation = {
+            "type": "song_arrangement_paste", "dst_slot": destination,
+            "song_data": base64.b64encode(record).decode("ascii"),
+        }
+        if clear_source_slot is not None:
+            operation["clear_source_slot"] = self._song_slot(clear_source_slot, "source")
+        self.stage(operation)
 
     def stage_song_import(
         self,

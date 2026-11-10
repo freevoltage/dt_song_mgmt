@@ -13,7 +13,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Input, Label, OptionList, Static, Tab, Tabs
 
-from .constants import SONG_ROW_LABELS
+from .constants import SONG_ROW_LABELS, SONG_SIZE
 from .session import ProjectSession
 from .pattern_steps import pattern_trigs
 from .songs import (
@@ -265,7 +265,7 @@ class ProjectPickerModal(ModalScreen[Path | None]):
             self.query_one("#project-picker-list", OptionList).focus()
 
 
-class SongPatternMappingModal(ModalScreen[list[dict] | None]):
+class SongPatternMappingModal(ModalScreen[dict | None]):
     """Edit a song bundle's source-to-destination pattern slot mapping."""
 
     CSS = """
@@ -293,9 +293,10 @@ class SongPatternMappingModal(ModalScreen[list[dict] | None]):
         source_pattern_names: list[str],
         destination_pattern_names: list[str],
         source_project: str,
-        source_song: int,
+        source_song: int | None,
         destination_project: str,
         destination_song: int,
+        arrangement_only: bool = False,
     ):
         super().__init__()
         self.source_patterns = sorted(source_patterns)
@@ -305,12 +306,13 @@ class SongPatternMappingModal(ModalScreen[list[dict] | None]):
         self.source_song = source_song
         self.destination_project = destination_project
         self.destination_song = destination_song
+        self.arrangement_only = arrangement_only
 
     def compose(self) -> ComposeResult:
         with Vertical(id="song-pattern-map-dialog"):
-            yield Label("Map song patterns")
+            yield Label("Paste song")
             yield Static(
-                f"FROM  {self.source_project} · song {self.source_song:02d}\n"
+                f"FROM  {self.source_project}" + (f" · song {self.source_song:02d}" if self.source_song is not None else "") + "\n"
                 f"TO      {self.destination_project} · song {self.destination_song:02d}",
                 id="mapping-context",
             )
@@ -325,24 +327,33 @@ class SongPatternMappingModal(ModalScreen[list[dict] | None]):
                             classes="mapping-source",
                         )
                         yield Static("→", classes="mapping-arrow")
-                        yield Input(
-                            value=pattern_label(source),
-                            placeholder="A01–H16",
-                            id=f"mapping-destination-{source}",
-                            classes="mapping-destination",
-                        )
+                        if self.arrangement_only:
+                            yield Static(pattern_label(source), classes="mapping-destination")
+                        else:
+                            yield Input(
+                                value=pattern_label(source),
+                                placeholder="A01–H16",
+                                id=f"mapping-destination-{source}",
+                                classes="mapping-destination",
+                            )
                         yield Static(destination_name, id=f"mapping-current-{source}", classes="mapping-current")
             yield Static(
-                "Destinations default to the source slots. Each destination pattern will be replaced.",
+                "Keep patterns uses the original slots. Copy patterns replaces the mapped destination slots."
+                if not self.arrangement_only else
+                "Arrangement file only: destination patterns stay in place. Check the device type and slot numbers.",
                 id="mapping-note",
             )
             yield Static("", id="mapping-error")
             with Horizontal(id="mapping-buttons"):
                 yield Button("Cancel", id="cancel")
-                yield Button("Apply mapping", id="apply", variant="primary")
+                yield Button("Keep patterns", id="keep")
+                if not self.arrangement_only:
+                    yield Button("Copy patterns", id="apply", variant="primary")
 
     def on_mount(self) -> None:
-        if self.source_patterns:
+        if self.arrangement_only:
+            self.query_one("#keep", Button).focus()
+        elif self.source_patterns:
             self.query_one(f"#mapping-destination-{self.source_patterns[0]}", Input).focus()
 
     @staticmethod
@@ -364,7 +375,7 @@ class SongPatternMappingModal(ModalScreen[list[dict] | None]):
         except ValueError as exc:
             self.query_one("#mapping-error", Static).update(str(exc))
             return
-        self.dismiss(mappings)
+        self.dismiss({"mode": "patterns", "mappings": mappings})
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self._apply_mapping()
@@ -383,6 +394,8 @@ class SongPatternMappingModal(ModalScreen[list[dict] | None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "apply":
             self._apply_mapping()
+        elif event.button.id == "keep":
+            self.dismiss({"mode": "arrangement"})
         else:
             self.dismiss(None)
 
@@ -675,7 +688,6 @@ class ProjectBrowser(App[None]):
         ("e", "empty_song", "Empty song slot"),
         ("x", "export_song_file", "Export song .bin"),
         ("i", "import_song_file", "Import song .bin"),
-        ("g", "import_song_project", "Import song slot"),
         ("ctrl+e", "export_project_json", "Export project JSON"),
         ("ctrl+i", "import_project_json", "Restore project JSON"),
         ("s", "save_project", "Save project"),
@@ -785,70 +797,83 @@ class ProjectBrowser(App[None]):
         }
         action = "Copied" if mode == "copy" else "Cut"
         self.notify(
-            f"{action} song slot {self.active_song_slot:02d} with its referenced patterns; "
+            f"{action} song slot {self.active_song_slot:02d}; "
             "focus a destination song slot and press p"
         )
 
     def _paste_song_clipboard(self) -> None:
         clipboard = self._dsm_clipboard
-        if not clipboard or clipboard.get("kind") != "song":
+        if not clipboard or clipboard.get("kind") not in {"song", "song_file"} or self.session is None:
             self.notify("Song clipboard is empty", severity="warning")
             return
-        source_session = clipboard["session"]
-        source_slot = int(clipboard["slot"])
+        source_session = clipboard.get("session")
+        source_slot = int(clipboard["slot"]) if source_session is not None else None
         destination_slot = self.active_song_slot
         if clipboard["mode"] == "cut" and source_session is self.session and source_slot == destination_slot:
             self.notify("Choose a different destination song slot", severity="warning")
             return
-        source_raw = source_session.working_raw()
-        source_patterns = {row[0] for row in get_song_rows(get_song_slots(source_raw)[source_slot])}
+        if source_session is not None and source_session.device != self.session.device:
+            self.notify("Songs can only be pasted between matching device types", severity="error")
+            return
+        source_raw = source_session.working_raw() if source_session is not None else None
+        record = get_song_slots(source_raw)[source_slot] if source_raw is not None else clipboard["record"]
+        source_patterns = {row[0] for row in get_song_rows(record)}
         if not source_patterns:
             self.notify("This song has no rows or referenced patterns to paste", severity="warning")
             return
         self.push_screen(
             SongPatternMappingModal(
                 source_patterns,
-                collect_pattern_names(source_raw),
+                collect_pattern_names(source_raw) if source_raw is not None else [""] * 128,
                 collect_pattern_names(self.session.working_raw()),
-                source_session.display_name if source_session.is_new_project else source_session.path.name,
+                (source_session.display_name if source_session.is_new_project else source_session.path.name)
+                if source_session is not None else clipboard["name"],
                 source_slot,
                 self.session.display_name if self.session.is_new_project else self.session.path.name,
                 destination_slot,
+                arrangement_only=source_session is None,
             ),
             lambda value: self._on_song_bundle_mapping(
-                value, clipboard, source_raw, destination_slot
+                value, clipboard, source_raw, record, destination_slot
             ),
         )
 
     def _on_song_bundle_mapping(
         self,
-        mappings: list[dict] | None,
+        selection: dict | None,
         clipboard: dict,
-        source_raw: bytes,
+        source_raw: bytes | None,
+        record: bytes,
         destination_slot: int,
     ) -> None:
-        if mappings is None:
+        if selection is None or self.session is None:
             return
-        source_session = clipboard["session"]
-        source_slot = int(clipboard["slot"])
+        source_session = clipboard.get("session")
+        source_slot = int(clipboard["slot"]) if source_session is not None else None
         destination_staged = False
         try:
-            source_members = source_session.working_members()
-            source_manifest = json.loads(
-                next(data for info, data in source_members if info.filename == "manifest.json")
-            )
-            self.session.stage_song_bundle_import(
-                source_session.path,
-                source_slot,
-                destination_slot,
-                mappings,
-                source_raw=source_raw,
-                source_manifest=source_manifest,
-                source_members=source_members,
-            )
-            destination_staged = True
-            if clipboard["mode"] == "cut":
-                source_session.stage_song_bundle_cut(source_slot)
+            if selection["mode"] == "arrangement":
+                same_project_cut = clipboard["mode"] == "cut" and source_session is self.session
+                self.session.stage_song_arrangement_paste(
+                    destination_slot, record, source_slot if same_project_cut else None,
+                )
+                destination_staged = True
+                if clipboard["mode"] == "cut" and not same_project_cut:
+                    source_session.stage({"type": "empty_song", "slot": source_slot})
+            else:
+                if source_session is None or source_raw is None or source_slot is None:
+                    raise ValueError("this arrangement file does not contain patterns")
+                source_members = source_session.working_members()
+                source_manifest = json.loads(
+                    next(data for info, data in source_members if info.filename == "manifest.json")
+                )
+                self.session.stage_song_bundle_import(
+                    source_session.path, source_slot, destination_slot, selection["mappings"],
+                    source_raw=source_raw, source_manifest=source_manifest, source_members=source_members,
+                )
+                destination_staged = True
+                if clipboard["mode"] == "cut":
+                    source_session.stage_song_bundle_cut(source_slot)
         except Exception as exc:
             if destination_staged:
                 self.session.undo()
@@ -856,6 +881,10 @@ class ProjectBrowser(App[None]):
             return
         if clipboard["mode"] == "cut":
             self._dsm_clipboard = None
+        if selection["mode"] == "arrangement":
+            verb = "Moved" if clipboard["mode"] == "cut" else "Pasted"
+            self.notify(f"{verb} song arrangement to slot {destination_slot:02d}; destination patterns kept")
+        elif clipboard["mode"] == "cut":
             sample_note = (
                 " Available Digitakt WAVs were staged; factory sounds may use device references."
                 if self.session.device == "DT2" else ""
@@ -1704,8 +1733,10 @@ class ProjectBrowser(App[None]):
         self.notify(f"Exported song slot {self.active_song_slot:02d} to {path}", timeout=10)
 
     def action_import_song_file(self) -> None:
+        if self.session is None:
+            return
         self.push_screen(
-            EntryModal("Import song backup", f"Enter a .bin path for song slot {self.active_song_slot:02d}."),
+            EntryModal("Load song arrangement", "Enter a .bin path, then choose a song slot and press p."),
             self._on_import_song_file_path,
         )
 
@@ -1715,74 +1746,14 @@ class ProjectBrowser(App[None]):
         path = Path(value.strip()).expanduser()
         try:
             record = path.read_bytes()
-            self.session.stage_song_file_restore(self.active_song_slot, record)
+            if len(record) != SONG_SIZE:
+                raise ValueError(f"song arrangement must be exactly {SONG_SIZE} bytes")
         except Exception as exc:
-            self.notify(f"Could not stage song import: {exc}", severity="error", timeout=10)
+            self.notify(f"Could not load song arrangement: {exc}", severity="error", timeout=10)
             return
-        self.selected_row_indices.clear()
-        self._refresh_state()
-        self.notify(f"Song backup staged in slot {self.active_song_slot:02d}; press s to save")
-
-    def action_import_song_project(self) -> None:
-        if self.session is None:
-            return
-        source_sessions = [item for item in self.sessions if item.path != self.session.path]
-        tabs = "\n".join(
-            f"{index + 1}: {item.display_name if item.is_new_project else item.path.name} ({item.device}, "
-            f"{'DRAFT ' + str(len(item.operations)) if item.operations else 'CLEAN'})"
-            for index, item in enumerate(source_sessions)
-        )
-        prompt = "Enter an open project tab number, or a project path."
-        if tabs:
-            prompt += "\nOpen project tabs:\n" + tabs
-        self.push_screen(
-            EntryModal("Import song slot", prompt, "tab number or project path"),
-            lambda value: self._on_import_song_source(value, source_sessions),
-        )
-
-    def _on_import_song_source(self, value: str | None, source_sessions: list[ProjectSession]) -> None:
-        if value is None or not value.strip():
-            return
-        source_input = value.strip()
-        source_session = None
-        if source_input.isdigit() and 1 <= int(source_input) <= len(source_sessions):
-            source_session = source_sessions[int(source_input) - 1]
-            source_path = source_session.path
-        else:
-            source_path = Path(source_input).expanduser().resolve()
-            source_session = next((item for item in self.sessions if item.path == source_path), None)
-        self.push_screen(
-            EntryModal("Source song slot", "Enter a source slot from 0 to 15.", "0–15"),
-            lambda slot: self._on_import_song_slot(source_path, source_session, slot),
-        )
-
-    def _on_import_song_slot(
-        self,
-        source_path: Path,
-        source_session: ProjectSession | None,
-        value: str | None,
-    ) -> None:
-        if value is None or self.session is None:
-            return
-        try:
-            source_slot = int(value.strip())
-            if not 0 <= source_slot < 16:
-                raise ValueError
-            source_raw = source_session.working_raw() if source_session is not None else None
-            self.session.stage_song_import(
-                source_path,
-                source_slot,
-                self.active_song_slot,
-                source_raw=source_raw,
-            )
-        except Exception as exc:
-            self.notify(f"Could not stage song import: {exc}", severity="error", timeout=10)
-            return
-        self.selected_row_indices.clear()
-        self._refresh_state()
-        self.notify(
-            f"Song slot {source_slot:02d} staged in slot {self.active_song_slot:02d}; press s to save"
-        )
+        self._dsm_clipboard = {"kind": "song_file", "mode": "copy", "record": record, "name": path.name}
+        self.query_one("#songs-list", NavigatorList).focus()
+        self.notify("Song arrangement loaded; choose a destination song and press p")
 
     def action_export_project_json(self) -> None:
         if self.session is None:
