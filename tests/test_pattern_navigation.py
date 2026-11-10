@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from textual.app import App
+from textual.widgets import Static
 
 from dt_song_mgmt.songs import pattern_label
 from dt_song_mgmt.tui_patterns import PatternManagerScreen
@@ -21,6 +22,24 @@ class PatternApp(App):
 
 
 class PatternNavigationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_song_use_stays_visible_in_narrow_pattern_list(self):
+        patterns = [
+            {"index": i, "label": pattern_label(i), "name": "FROSCH" if i == 16 else "",
+             "ref_count": 15 if i == 16 else 0,
+             "references": [{"song_slot": 0, "song_name": "FROSCH", "row": 1}] if i == 16 else []}
+            for i in range(128)
+        ]
+        with patch("dt_song_mgmt.tui_patterns.get_all_patterns_info", return_value=patterns):
+            app = PatternApp()
+            async with app.run_test(size=(45, 30)) as pilot:
+                await pilot.press("2", "home")
+                await pilot.pause()
+                screen = app.screen
+                line = str(screen.query_one("#pattern-list", Static).render()).splitlines()[0]
+                visible_width = screen.query_one("#pattern-results").size.width
+                self.assertIn("15r", line[:visible_width])
+                self.assertIn("FROSCH", str(screen.query_one("#pattern-selection", Static).render()))
+
     async def test_arrows_and_pages_follow_slots_in_every_bank_and_search(self):
         patterns = [
             {

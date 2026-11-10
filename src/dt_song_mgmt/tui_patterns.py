@@ -188,7 +188,7 @@ class PatternManagerScreen(ModalScreen[None]):
                 with Vertical(id="pattern-results"):
                     yield Static("", id="pattern-count")
                     yield Input(placeholder="/ to filter slots or names", id="pattern-search")
-                    yield Static("    SLOT  PATTERN NAME                    SONG USE", id="pattern-columns")
+                    yield Static("    SLOT  SONG   PATTERN NAME", id="pattern-columns")
                     with VerticalScroll(id="pattern-scroll"):
                         yield PatternList("", id="pattern-list")
             yield Static("", id="pattern-selection")
@@ -255,8 +255,8 @@ class PatternManagerScreen(ModalScreen[None]):
         for pattern in patterns:
             name = pattern["name"].strip() or "(unnamed)"
             marker = ">" if pattern["index"] == self.selected_pattern else " "
-            usage = f"USED · {pattern['ref_count']} rows" if pattern["ref_count"] else "UNUSED"
-            line = f"{marker} {pattern['label']:<4}  {name:<18}  {usage}"
+            usage = f"{pattern['ref_count']}r" if pattern["ref_count"] else "–"
+            line = f"{marker} {pattern['label']:<4}  {usage:<5}  {name}"
             content.append(line, style="reverse bold" if marker == ">" else None)
             content.append("\n")
         if not patterns:
