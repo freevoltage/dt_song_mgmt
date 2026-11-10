@@ -38,6 +38,12 @@ class DeletionTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("right")
                 self.assertEqual(app.focused.id, "rows-list")
                 app.selected_row_indices = {0, 1}
+                await pilot.press("shift+space")
+                self.assertEqual(app.selected_row_indices, set())
+                app.selected_row_indices = {0, 1}
+                await pilot.press("backslash")
+                self.assertEqual(app.selected_row_indices, set())
+                app.selected_row_indices = {0, 1}
                 await pilot.press("d")
                 self.assertIsInstance(app.screen, ConfirmModal)
                 session.stage.assert_not_called()

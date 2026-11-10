@@ -711,6 +711,8 @@ class ProjectBrowser(App[None]):
         ("tab", "switch_pane", "Switch pane"),
         ("enter", "focus_song_rows", "Open / edit row"),
         ("space", "toggle_row_selection", "Select row"),
+        ("shift+space", "clear_row_selection", "Unselect rows"),
+        ("backslash", "clear_row_selection", "Unselect rows"),
         ("d", "delete_row", "Delete selection"),
         ("alt+up", "move_row_up", "Move row up"),
         ("alt+down", "move_row_down", "Move row down"),
@@ -778,7 +780,7 @@ class ProjectBrowser(App[None]):
         if self.song_preview_visible and isinstance(self.focused, SongSequencerGrid):
             if action in {
                 "delete_row", "move_row_up", "move_row_down", "copy_row", "move_row",
-                "rename_song", "swap_song", "clear_song", "empty_song", "toggle_row_selection",
+                "rename_song", "swap_song", "clear_song", "empty_song", "toggle_row_selection", "clear_row_selection",
                 "export_song_file", "import_song_file",
             }:
                 return False
@@ -1411,6 +1413,12 @@ class ProjectBrowser(App[None]):
             self.selected_row_indices.add(index)
         self._show_song(self.active_song_slot)
 
+    def action_clear_row_selection(self) -> None:
+        if self.focused is not self.query_one("#rows-list", NavigatorList):
+            return
+        self.selected_row_indices.clear()
+        self._show_song(self.active_song_slot)
+
     def _stage_row_update(self, updates: dict, success_message: str) -> None:
         indices = self._active_row_indices()
         if self.session is None or indices is None:
@@ -1708,7 +1716,7 @@ class ProjectBrowser(App[None]):
         else:
             help_text = (
                 "↑↓ move rows · ←/→ move columns · Tab / ← at Pattern returns to songs · Enter edits cell\n"
-                "d delete song/rows · Songs Y/X/P · Rows c/m · s save"
+                "Space mark · Shift+Space / \\ clear marks · d delete · s save"
             )
         self.query_one("#message", Static).update(help_text)
 
