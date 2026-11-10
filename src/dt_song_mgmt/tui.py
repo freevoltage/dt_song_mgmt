@@ -15,6 +15,7 @@ from textual.widgets import Button, Footer, Input, Label, OptionList, Static, Ta
 
 from .constants import SONG_ROW_LABELS
 from .session import ProjectSession
+from .pattern_steps import pattern_trigs
 from .songs import (
     SONG_ROW_MAX,
     format_bpm,
@@ -544,6 +545,25 @@ class NavigatorList(Static):
             getattr(self.app, action)()
 
 
+class SongWorkspace(Horizontal):
+    """Place the sequencer below the song panes when the terminal is narrow."""
+
+    def on_resize(self, event) -> None:
+        self.set_class(event.size.width < 100, "compact")
+
+
+class SongSequencerGrid(Static):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_width = -1
+
+    def on_resize(self, event) -> None:
+        if event.size.width != self._last_width:
+            self._last_width = event.size.width
+            if self.app.song_preview_visible:
+                self.app._refresh_song_preview()
+
+
 class ProjectBrowser(App[None]):
     """Browse a project's song slots and song rows in the terminal."""
 
@@ -591,6 +611,14 @@ class ProjectBrowser(App[None]):
         padding: 0 2;
         layout: horizontal;
     }
+    #song-workspace-main { width: 1fr; height: 1fr; }
+    #song-sequencer { display: none; width: 2fr; min-width: 25; border-left: solid $panel; padding: 0 1; }
+    #song-sequencer-grid { height: auto; }
+    #workspace.preview-visible #song-workspace-main { width: 3fr; }
+    #workspace.preview-visible #song-sequencer { display: block; }
+    #workspace.preview-visible.compact { layout: vertical; }
+    #workspace.preview-visible.compact #song-workspace-main { width: 100%; height: 1fr; }
+    #workspace.preview-visible.compact #song-sequencer { width: 100%; height: 9; border-left: none; border-top: solid $panel; }
     #songs-pane {
         width: 30;
         min-width: 24;
@@ -660,6 +688,11 @@ class ProjectBrowser(App[None]):
         ("f3", "open_sample_memory", "Sample memory"),
         ("f4", "open_song_pattern_overview", "Song pattern overview"),
         ("f5", "open_sample_browser", "Sample browser"),
+        ("f6", "toggle_song_preview", "Song sequencer"),
+        ("alt+left", "song_preview_page(-1)", "Previous step page"),
+        ("alt+right", "song_preview_page(1)", "Next step page"),
+        ("ctrl+up", "scroll_song_preview(-3)", "Scroll sequencer up"),
+        ("ctrl+down", "scroll_song_preview(3)", "Scroll sequencer down"),
         ("ctrl+o", "open_project", "Open project"),
         ("ctrl+n", "new_project", "New empty project"),
         ("]", "next_project", "Next project"),
@@ -692,28 +725,33 @@ class ProjectBrowser(App[None]):
         self.active_row_column = 0
         self.editing_label_idx: int | None = None
         self.selected_row_indices: set[int] = set()
+        self.song_preview_visible = False
+        self.song_preview_page = 0
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="project-header"):
             yield Static("Loading project…", id="project-banner")
             yield Static("", id="device-banner")
         yield Tabs(Tab(self.project_path.name if self.project_path else "Choose a project", id="project-0"), id="project-tabs")
-        with Horizontal(id="workspace"):
-            with Vertical(id="songs-pane"):
-                yield Static("SONGS", id="songs-title", classes="pane-title")
-                with VerticalScroll(id="songs-scroll"):
-                    yield NavigatorList("", id="songs-list", classes="navigator-list")
-                yield Static("", id="song-detail")
-            with Vertical(id="rows-pane"):
-                yield Static("SONG ROWS", id="rows-title", classes="pane-title")
-                yield Static("  #  PATTERN/NAME       LABEL  REP   BPM   LEN  MUTES", id="rows-columns")
-                with VerticalScroll(id="rows-scroll"):
-                    yield NavigatorList("", id="rows-list", classes="navigator-list")
-                yield Static("", id="row-detail")
+        with SongWorkspace(id="workspace"):
+            with Horizontal(id="song-workspace-main"):
+                with Vertical(id="songs-pane"):
+                    yield Static("SONGS", id="songs-title", classes="pane-title")
+                    with VerticalScroll(id="songs-scroll"):
+                        yield NavigatorList("", id="songs-list", classes="navigator-list")
+                    yield Static("", id="song-detail")
+                with Vertical(id="rows-pane"):
+                    yield Static("SONG ROWS", id="rows-title", classes="pane-title")
+                    yield Static("  #  PATTERN/NAME       LABEL  REP   BPM   LEN  MUTES", id="rows-columns")
+                    with VerticalScroll(id="rows-scroll"):
+                        yield NavigatorList("", id="rows-list", classes="navigator-list")
+                    yield Static("", id="row-detail")
+            with VerticalScroll(id="song-sequencer"):
+                yield SongSequencerGrid("", id="song-sequencer-grid")
         yield Static("", id="mute-display")
         yield Static(
             "↑↓ rows · ←/→ columns · Tab panes · brackets switch projects · Ctrl+O open · Ctrl+N new\n"
-            "Songs Y/X/P bundle · Rows c/m/d · s save · Ctrl+Shift+S Save As",
+            "Songs Y/X/P · Rows c/m/d · F6 sequencer · Alt+←/→ page · s save",
             id="message",
         )
         yield Footer()
@@ -1185,6 +1223,63 @@ class ProjectBrowser(App[None]):
                 if track < 16:
                     mute_display.append(" ")
         self.query_one("#mute-display", Static).update(mute_display)
+        if self.song_preview_visible:
+            self._refresh_song_preview()
+
+    def action_toggle_song_preview(self) -> None:
+        if self.session is None:
+            self.notify("Open a project first", severity="warning")
+            return
+        self.song_preview_visible = not self.song_preview_visible
+        self.query_one("#workspace", SongWorkspace).set_class(self.song_preview_visible, "preview-visible")
+        if self.song_preview_visible:
+            self._refresh_song_preview()
+
+    def action_song_preview_page(self, delta: int) -> None:
+        if self.song_preview_visible:
+            self.song_preview_page = max(0, min(7, self.song_preview_page + delta))
+            self._refresh_song_preview()
+
+    def action_scroll_song_preview(self, delta: int) -> None:
+        if self.song_preview_visible:
+            self.query_one("#song-sequencer", VerticalScroll).scroll_relative(y=delta, animate=False)
+
+    def _refresh_song_preview(self) -> None:
+        if not self.song_preview_visible or self.session is None:
+            return
+        output = Text()
+        if not self.songs or self.active_row_index is None:
+            output.append("Select a song row to preview its pattern.")
+        else:
+            rows = self.songs[self.active_song_slot]["rows"]
+            if not 0 <= self.active_row_index < len(rows):
+                output.append("Select a song row to preview its pattern.")
+            else:
+                row = rows[self.active_row_index]
+                try:
+                    tracks = pattern_trigs(self.session.working_raw(), row["pattern"], self.session.device)
+                except ValueError as exc:
+                    output.append(f"Cannot read trigs: {exc}")
+                else:
+                    start = self.song_preview_page * 16
+                    width = self.query_one("#song-sequencer-grid", SongSequencerGrid).size.width
+                    cell_width = max(1, (width - 10) // 16)
+                    output.append(f"{pattern_label(row['pattern'])}  STEPS {start + 1:03}–{start + 16:03}\n", style="bold")
+                    output.append("      " + " ".join(
+                        f"{start + group + 1:03}".ljust(cell_width * 4)
+                        for group in (0, 4, 8, 12)
+                    ).rstrip() + "\n", style="dim")
+                    for index, steps in enumerate(tracks):
+                        muted = bool(row["mute"] & (1 << index))
+                        output.append(f"T{index + 1:02} {'M' if muted else ' '} ", style="dim" if muted else None)
+                        for step in range(16):
+                            active = steps[start + step]
+                            output.append(("●" if active else "·").center(cell_width), style="dim" if muted or not active else "bold")
+                            if step % 4 == 3 and step != 15:
+                                output.append(" ")
+                        output.append("\n")
+                    output.append("\nM = muted in this song row\nAlt+←/→ page · Ctrl+↑/↓ scroll", style="dim")
+        self.query_one("#song-sequencer-grid", SongSequencerGrid).update(output)
 
     def _selected_row(self) -> dict | None:
         if self.active_row_index is None:
