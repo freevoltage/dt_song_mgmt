@@ -96,6 +96,23 @@ class PatternList(Static):
     """Focusable, text-rendered pattern list with no table widget chrome."""
 
     can_focus = True
+    BINDINGS = [
+        ("up", "move(-1)", "Previous pattern"),
+        ("down", "move(1)", "Next pattern"),
+        ("pageup", "move(-12)", "Page up"),
+        ("pagedown", "move(12)", "Page down"),
+        ("home", "first", "First pattern"),
+        ("end", "last", "Last pattern"),
+    ]
+
+    def action_move(self, delta: int) -> None:
+        self.screen._move_selection(delta)
+
+    def action_first(self) -> None:
+        self.screen.action_select_first_pattern()
+
+    def action_last(self) -> None:
+        self.screen.action_select_last_pattern()
 
 
 class PatternManagerScreen(ModalScreen[None]):
@@ -300,7 +317,7 @@ class PatternManagerScreen(ModalScreen[None]):
             return
         indices = [pattern["index"] for pattern in self._visible_patterns]
         current = indices.index(self.selected_pattern) if self.selected_pattern in indices else 0
-        self.selected_pattern = max(0, min(len(indices) - 1, current + delta))
+        self.selected_pattern = indices[max(0, min(len(indices) - 1, current + delta))]
         self._refresh_view()
 
     def action_select_previous_pattern(self) -> None:
