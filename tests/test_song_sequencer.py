@@ -8,7 +8,7 @@ from unittest.mock import patch
 from textual.widgets import Static
 
 from dt_song_mgmt.constants import PATTERN_BASE, PATTERN_STRIDE
-from dt_song_mgmt.tui import ProjectBrowser
+from dt_song_mgmt.tui import EntryModal, ProjectBrowser
 
 
 class SongSequencerTests(unittest.IsolatedAsyncioTestCase):
@@ -32,7 +32,7 @@ class SongSequencerTests(unittest.IsolatedAsyncioTestCase):
         ):
             app = ProjectBrowser(session.path)
             async with app.run_test(size=(140, 35)) as pilot:
-                await pilot.press("f6")
+                await pilot.press("v")
                 await pilot.pause()
                 grid = app.query_one("#song-sequencer-grid", Static)
                 first = str(grid.render()).splitlines()
@@ -54,8 +54,12 @@ class SongSequencerTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("ctrl+down")
                 await pilot.pause()
                 self.assertGreater(app.query_one("#song-sequencer").scroll_y, 0)
-                await pilot.press("f6")
+                await pilot.press("v")
                 self.assertFalse(app.song_preview_visible)
+                await pilot.press("f6")
+                self.assertTrue(app.song_preview_visible)
+                await pilot.press("i")
+                self.assertIsInstance(app.screen, EntryModal)
 
 
 if __name__ == "__main__":

@@ -674,7 +674,7 @@ class ProjectBrowser(App[None]):
         ("k", "clear_song", "Clear song rows"),
         ("e", "empty_song", "Empty song slot"),
         ("x", "export_song_file", "Export song .bin"),
-        ("v", "import_song_file", "Import song .bin"),
+        ("i", "import_song_file", "Import song .bin"),
         ("g", "import_song_project", "Import song slot"),
         ("ctrl+e", "export_project_json", "Export project JSON"),
         ("ctrl+i", "import_project_json", "Restore project JSON"),
@@ -688,6 +688,7 @@ class ProjectBrowser(App[None]):
         ("f4", "open_song_pattern_overview", "Song pattern overview"),
         ("f5", "open_sample_browser", "Sample browser"),
         ("f6", "toggle_song_preview", "Song sequencer"),
+        ("v", "toggle_song_preview", "Song sequencer"),
         ("alt+left", "song_preview_page(-1)", "Previous step page"),
         ("alt+right", "song_preview_page(1)", "Next step page"),
         ("ctrl+up", "scroll_song_preview(-3)", "Scroll sequencer up"),
@@ -750,7 +751,7 @@ class ProjectBrowser(App[None]):
         yield Static("", id="mute-display")
         yield Static(
             "↑↓ rows · ←/→ columns · Tab panes · brackets switch projects · Ctrl+O open · Ctrl+N new\n"
-            "Songs Y/X/P · Rows c/m/d · F6 sequencer · Alt+←/→ page · s save",
+            "Songs Y/X/P · Rows c/m/d · v sequencer · Alt+←/→ page · s save",
             id="message",
         )
         yield Footer()
