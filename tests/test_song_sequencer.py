@@ -36,6 +36,10 @@ class SongSequencerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(header.index("BPM") + 3, values.index("120") + 3)
                 self.assertEqual(header.index("LEN") + 3, values.index("64") + 2)
                 self.assertEqual(header.index("MUTES"), values.index("16 trk"))
+                app.editing_label_idx = 1
+                app._show_song(0)
+                editing = str(app.query_one("#rows-list", Static).render()).splitlines()[0]
+                self.assertEqual(header.index("REP"), editing.index("×2"))
 
     async def test_preview_follows_rows_mutes_pages_and_window_size(self):
         raw = bytearray(PATTERN_BASE + 2 * PATTERN_STRIDE)

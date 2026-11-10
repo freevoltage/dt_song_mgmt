@@ -1209,7 +1209,7 @@ class ProjectBrowser(App[None]):
                 ("pattern", f"{pattern_label(pattern_id):<3} {compact_name}"),
                 (
                     "label",
-                    self._label_name(self.editing_label_idx) if self.editing_label_idx is not None and index == selected_row else label,
+                    self._label_name(self.editing_label_idx)[:5] if self.editing_label_idx is not None and index == selected_row else label,
                 ),
                 ("repeat", f"×{row['repeat']}"),
                 ("bpm", format_bpm(row['bpm_raw'])),
