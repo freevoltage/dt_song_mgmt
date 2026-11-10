@@ -566,9 +566,7 @@ class PatternManagerScreen(ModalScreen[None]):
         verb = "Moved" if is_cut else "Pasted"
         message = f"{verb} {pattern_label(source)} to {pattern_label(destination)} in the draft"
         if is_cut and source_session is not self.session:
-            message += "; both projects are staged, press s in each project to save"
-        else:
-            message += "; press s to save"
+            message += "; both projects are staged"
         context = []
         if is_cut and source_info["ref_count"]:
             context.append(f"song rows retargeted from {pattern_label(source)}: {self._reference_summary(source_info)}")
@@ -615,7 +613,7 @@ class PatternManagerScreen(ModalScreen[None]):
         source = self.selected_pattern
         source_info = self._pattern_info(source)
         destination_info = self._pattern_info(destination)
-        message = f"Copied {pattern_label(source)} to {pattern_label(destination)} in the draft; press s to save"
+        message = f"Copied {pattern_label(source)} to {pattern_label(destination)} in the draft"
         if source_info["ref_count"]:
             message += f" · source remains used: {self._reference_summary(source_info)}"
         if destination_info["ref_count"]:
@@ -641,7 +639,7 @@ class PatternManagerScreen(ModalScreen[None]):
         source = self.selected_pattern
         source_info = self._pattern_info(source)
         destination_info = self._pattern_info(destination)
-        message = f"Moved {pattern_label(source)} to {pattern_label(destination)} in the draft; press s to save"
+        message = f"Moved {pattern_label(source)} to {pattern_label(destination)} in the draft"
         if source_info["ref_count"]:
             message += f" · song rows retargeted: {self._reference_summary(source_info)}"
         if destination_info["ref_count"]:
@@ -685,7 +683,7 @@ class PatternManagerScreen(ModalScreen[None]):
     def _on_clear_confirmation(self, confirmed: bool, slot: int, info: dict) -> None:
         if not confirmed:
             return
-        message = f"Cleared {pattern_label(slot)} and its sound kit in the draft; press s to save"
+        message = f"Cleared {pattern_label(slot)} and its sound kit in the draft"
         if info["ref_count"]:
             message += f" · rows still reference the now-empty slot: {self._reference_summary(info)}"
         self._stage({"type": "pattern_clear", "pat_idx": slot}, message)
@@ -711,7 +709,7 @@ class PatternManagerScreen(ModalScreen[None]):
             return
         self._stage(
             {"type": "pattern_rename", "pat_idx": self.selected_pattern, "name": name},
-            f"Renamed {pattern_label(self.selected_pattern)} in the draft; press s to save",
+            f"Renamed {pattern_label(self.selected_pattern)} in the draft",
         )
 
     def action_import_pattern(self) -> None:
@@ -768,7 +766,7 @@ class PatternManagerScreen(ModalScreen[None]):
                 source_raw=source_raw,
             )
             self._refresh_view()
-            message = f"Imported {pattern_label(source_slot)} to {pattern_label(destination)} in the draft; press s to save"
+            message = f"Imported {pattern_label(source_slot)} to {pattern_label(destination)} in the draft"
             if source_info and source_info["ref_count"]:
                 message += f" · source remains used: {self._reference_summary(source_info)}"
             if destination_info["ref_count"]:

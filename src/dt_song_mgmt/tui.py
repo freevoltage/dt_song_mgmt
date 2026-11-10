@@ -504,7 +504,7 @@ class UnsavedExitModal(ModalScreen[str | None]):
         with Vertical(id="exit-dialog"):
             yield Label("Open projects have unsaved draft changes.")
             yield Static(self.summary)
-            yield Static("Press s in each project tab to save it as a new project file.")
+            yield Static("Save each project tab separately.")
             with Horizontal(id="exit-buttons"):
                 yield Button("Stay", id="stay")
                 yield Button("Discard All & Quit", id="discard", variant="error")
@@ -890,8 +890,8 @@ class ProjectBrowser(App[None]):
                 if self.session.device == "DT2" else ""
             )
             self.notify(
-                f"Moved song {source_slot:02d} to slot {destination_slot:02d}; both project drafts are staged. "
-                f"Press s to save each project.{sample_note}"
+                f"Moved song {source_slot:02d} to slot {destination_slot:02d}; both project drafts are staged."
+                f"{sample_note}"
             )
         else:
             sample_note = (
@@ -899,7 +899,7 @@ class ProjectBrowser(App[None]):
                 if self.session.device == "DT2" else ""
             )
             self.notify(
-                f"Copied song {source_slot:02d} to slot {destination_slot:02d} with patterns; press s to save."
+                f"Copied song {source_slot:02d} to slot {destination_slot:02d} with patterns."
                 f"{sample_note}"
             )
         if self.session is not None:
@@ -1000,7 +1000,7 @@ class ProjectBrowser(App[None]):
             return
         template_name = template.display_name
         self._add_project_session(session)
-        self.notify(f"Created an empty {session.device} project draft from {template_name}; press s to save it")
+        self.notify(f"Created an empty {session.device} project draft from {template_name}")
 
     def _on_open_project(self, selected_path: Path | None) -> None:
         if selected_path is None:
@@ -1373,7 +1373,7 @@ class ProjectBrowser(App[None]):
         self.active_row_index = destination
         self.selected_row_indices.clear()
         self._refresh_state()
-        self.notify("Row reordered in the draft; press s to save")
+        self.notify("Row reordered in the draft")
 
     def action_move_row_up(self) -> None:
         self._reorder_active_row(-1)
@@ -1452,7 +1452,7 @@ class ProjectBrowser(App[None]):
         self.selected_row_indices.clear()
         self._refresh_state()
         verb = "Moved" if move else "Copied"
-        self.notify(f"{verb} {len(source_rows)} row(s) to song slot {destination:02d} in the draft; press s to save")
+        self.notify(f"{verb} {len(source_rows)} row(s) to song slot {destination:02d} in the draft")
 
     def action_swap_song(self) -> None:
         if self.session is None:
@@ -1483,7 +1483,7 @@ class ProjectBrowser(App[None]):
         self.active_song_slot = target
         self.selected_row_indices.clear()
         self._refresh_state()
-        self.notify(f"Swapped song slots in the draft; press s to save")
+        self.notify("Swapped song slots in the draft")
 
     def action_clear_song(self) -> None:
         if self.session is None:
@@ -1496,7 +1496,7 @@ class ProjectBrowser(App[None]):
         self.active_row_index = None
         self.selected_row_indices.clear()
         self._refresh_state()
-        self.notify("Cleared song rows in the draft; name kept. Press s to save")
+        self.notify("Cleared song rows in the draft; name kept.")
 
     def action_empty_song(self) -> None:
         if self.session is None:
@@ -1509,7 +1509,7 @@ class ProjectBrowser(App[None]):
         self.active_row_index = None
         self.selected_row_indices.clear()
         self._refresh_state()
-        self.notify("Emptied song slot in the draft; press s to save")
+        self.notify("Emptied song slot in the draft")
 
     def action_edit_repeat(self) -> None:
         row = self._selected_row()
@@ -1530,7 +1530,7 @@ class ProjectBrowser(App[None]):
         except ValueError:
             self.notify("Repeat count must be an integer from 1 to 99", severity="error")
             return
-        self._stage_row_update({"repeat": repeat}, f"Repeat set to {repeat}; press s to save")
+        self._stage_row_update({"repeat": repeat}, f"Repeat set to {repeat}")
 
     def action_edit_bpm(self) -> None:
         row = self._selected_row()
@@ -1558,7 +1558,7 @@ class ProjectBrowser(App[None]):
         except (ValueError, OverflowError):
             self.notify("Enter a positive BPM value, or leave it blank to inherit", severity="error")
             return
-        self._stage_row_update({"bpm_raw": bpm_raw}, f"Row BPM set to {bpm:g}; press s to save")
+        self._stage_row_update({"bpm_raw": bpm_raw}, f"Row BPM set to {bpm:g}")
 
     def action_edit_length(self) -> None:
         row = self._selected_row()
@@ -1579,7 +1579,7 @@ class ProjectBrowser(App[None]):
         except ValueError:
             self.notify("Row length must be an integer from 1 to 1024", severity="error")
             return
-        self._stage_row_update({"length": length}, f"Row length set to {length}; press s to save")
+        self._stage_row_update({"length": length}, f"Row length set to {length}")
 
     def _toggle_label_edit(self) -> None:
         row = self._selected_row()
@@ -1594,7 +1594,7 @@ class ProjectBrowser(App[None]):
         self.editing_label_idx = None
         self._stage_row_update(
             {"label_idx": label_idx},
-            f"Row label set to {self._label_name(label_idx)}; press s to save",
+            f"Row label set to {self._label_name(label_idx)}",
         )
         self._update_main_help()
 
@@ -1667,7 +1667,7 @@ class ProjectBrowser(App[None]):
         toggled_mask = rows[indices[0]]["mute"] ^ (1 << (track - 1))
         state = "muted" if toggled_mask & (1 << (track - 1)) else "unmuted"
         self._refresh_state()
-        self.notify(f"Track {track} {state} on {len(indices)} row(s); press s to save")
+        self.notify(f"Track {track} {state} on {len(indices)} row(s)")
 
     def action_rename_song(self) -> None:
         if self.session is None:
@@ -1689,7 +1689,7 @@ class ProjectBrowser(App[None]):
             return
         self.session.stage({"type": "rename_song", "slot": self.active_song_slot, "name": name})
         self._refresh_state()
-        self.notify("Song name updated in the draft; press s to save")
+        self.notify("Song name updated in the draft")
 
     def action_export_song_file(self) -> None:
         if self.focused is self.query_one("#songs-list", NavigatorList):
@@ -1812,7 +1812,7 @@ class ProjectBrowser(App[None]):
                 message = (
                     f"Stage all patterns and song data from {backup.get('project_file', path.name)}? "
                     f"This replaces the current draft.{pending_note} Assets stored outside the project image, "
-                    "such as external samples, stay from the open project file. Nothing is written to a project file until you press s and choose where to save."
+                    "such as external samples, stay from the open project file. Changes remain staged until saved."
                 )
                 self.push_screen(
                     ConfirmModal("Restore full project snapshot", message, "Stage restore"),
@@ -1827,7 +1827,7 @@ class ProjectBrowser(App[None]):
                 message = (
                     "This is an older arrangement-only export. It contains song rows and mutes, "
                     "but no patterns. Current project patterns will be kept. "
-                    f"Stage the song data?{pending_note} Nothing is written to a project file until you press s and choose where to save."
+                    f"Stage the song data?{pending_note} Changes remain staged until saved."
                 )
                 self.push_screen(
                     ConfirmModal("Restore arrangement only", message, "Stage songs"),
@@ -1850,7 +1850,7 @@ class ProjectBrowser(App[None]):
         self.active_row_index = None
         self.selected_row_indices.clear()
         self._refresh_state()
-        self.notify("Full project snapshot staged; press s to save it as a project file", timeout=10)
+        self.notify("Full project snapshot staged", timeout=10)
 
     def _finish_legacy_arrangement(self, backup: dict, confirmed: bool) -> None:
         if not confirmed or self.session is None:
@@ -1905,7 +1905,7 @@ class ProjectBrowser(App[None]):
             "to_pattern": pattern,
         })
         self._refresh_state()
-        self.notify(f"{len(indices)} row(s) now use {pattern_label(pattern)}; press s to save")
+        self.notify(f"{len(indices)} row(s) now use {pattern_label(pattern)}")
 
     def action_delete_row(self) -> None:
         indices = self._active_row_indices()
@@ -1921,7 +1921,7 @@ class ProjectBrowser(App[None]):
         self.selected_row_indices.clear()
         self.active_row_index = min(previous_index, remaining - 1) if remaining else None
         self._refresh_state()
-        self.notify(f"Deleted {len(indices)} row(s) from the draft; press s to save")
+        self.notify(f"Deleted {len(indices)} row(s) from the draft")
 
     def action_undo_change(self) -> None:
         if self.session is None or not self.session.undo():
