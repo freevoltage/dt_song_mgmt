@@ -1301,9 +1301,9 @@ class ProjectBrowser(App[None]):
                     start = self.song_preview_page * 16
                     width = self.query_one("#song-sequencer-grid", SongSequencerGrid).size.width
                     cell_width = max(1, (width - 10) // 16)
-                    output.append(f"{pattern_label(row['pattern'])}  STEPS {start + 1:03}–{start + 16:03}\n", style="bold")
+                    output.append(f"{pattern_label(row['pattern'])}  PAGE {self.song_preview_page + 1}\n", style="bold")
                     output.append("      " + " ".join(
-                        f"{start + group + 1:03}".ljust(cell_width * 4)
+                        str(group + 1).ljust(cell_width * 4)
                         for group in (0, 4, 8, 12)
                     ).rstrip() + "\n", style="dim")
                     for index, steps in enumerate(tracks):

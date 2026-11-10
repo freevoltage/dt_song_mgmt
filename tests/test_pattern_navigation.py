@@ -29,7 +29,7 @@ class PatternApp(App):
 class PatternNavigationTests(unittest.IsolatedAsyncioTestCase):
     async def test_optional_preview_follows_pattern_and_pages(self):
         raw = bytearray(PATTERN_BASE + PATTERN_STRIDE)
-        for step in (0, 4, 8, 12):
+        for step in (0, 4, 8, 12, 16):
             offset = PATTERN_BASE + 4 + 2 * step
             raw[offset:offset + 2] = b"\x03\x81"
         patterns = [
@@ -44,7 +44,7 @@ class PatternNavigationTests(unittest.IsolatedAsyncioTestCase):
                 screen = app.screen
                 self.assertTrue(screen.preview_visible)
                 text = str(screen.query_one("#pattern-preview-grid", Static).render())
-                self.assertIn("A01  STEPS 001–016", text)
+                self.assertIn("A01  PAGE 1", text)
                 self.assertEqual(text.splitlines()[2].count("●"), 4)
                 small_track_width = len(text.splitlines()[2])
                 small_preview_width = screen.query_one("#pattern-preview").size.width
@@ -60,7 +60,10 @@ class PatternNavigationTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertEqual(str(grid.render()).splitlines()[2].count("●"), 4)
                 await pilot.press("right")
-                self.assertIn("STEPS 017–032", str(screen.query_one("#pattern-preview-grid", Static).render()))
+                page_two = str(screen.query_one("#pattern-preview-grid", Static).render()).splitlines()
+                self.assertIn("PAGE 2", page_two[0])
+                self.assertEqual(page_two[1].split(), ["1", "5", "9", "13"])
+                self.assertEqual(page_two[2].count("●"), 1)
                 await pilot.press("v")
                 self.assertFalse(screen.preview_visible)
 

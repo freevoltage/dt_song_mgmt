@@ -335,14 +335,14 @@ class PatternManagerScreen(ModalScreen[None]):
                 start = self.preview_page * 16
                 width = self.query_one("#pattern-preview-grid", SequencerGrid).size.width
                 cell_width = max(1, (width - 8) // 16)
-                output.append(f"{pattern_label(self.selected_pattern)}  STEPS {start + 1:03}–{start + 16:03}\n", style="bold")
-                if cell_width >= max(3, len(str(start + 16))):
+                output.append(f"{pattern_label(self.selected_pattern)}  PAGE {self.preview_page + 1}\n", style="bold")
+                if cell_width >= 3:
                     header = " ".join(
-                        "".join(f"{start + step + 1:0{len(str(start + 16))}d}".center(cell_width) for step in range(group, group + 4))
+                        "".join(str(step + 1).center(cell_width) for step in range(group, group + 4))
                         for group in (0, 4, 8, 12)
                     )
                 else:
-                    header = " ".join(f"{start + group + 1:03}".ljust(cell_width * 4) for group in (0, 4, 8, 12)).rstrip()
+                    header = " ".join(str(group + 1).ljust(cell_width * 4) for group in (0, 4, 8, 12)).rstrip()
                 output.append("     " + header + "\n", style="dim")
                 for index, steps in enumerate(tracks):
                     output.append(f"T{index + 1:02}  ")
