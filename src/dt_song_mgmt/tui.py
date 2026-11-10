@@ -423,10 +423,13 @@ class ConfirmModal(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(id="generic-confirm-dialog"):
             yield Label(self.title_text)
-            yield Static(self.message_text)
+            yield Static(self.message_text, markup=False)
             with Horizontal(id="generic-confirm-buttons"):
                 yield Button("Cancel", id="cancel")
                 yield Button(self.confirm_label, id="confirm", variant="warning")
+
+    def on_mount(self) -> None:
+        self.query_one("#cancel", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm")
@@ -708,7 +711,7 @@ class ProjectBrowser(App[None]):
         ("tab", "switch_pane", "Switch pane"),
         ("enter", "focus_song_rows", "Open / edit row"),
         ("space", "toggle_row_selection", "Select row"),
-        ("d", "delete_row", "Delete row"),
+        ("d", "delete_row", "Delete selection"),
         ("alt+up", "move_row_up", "Move row up"),
         ("alt+down", "move_row_down", "Move row down"),
         ("c", "copy_row", "Copy row"),
@@ -809,7 +812,7 @@ class ProjectBrowser(App[None]):
         yield Static("", id="mute-display")
         yield Static(
             "↑↓ rows · ←/→ columns · Tab panes · brackets switch projects · Ctrl+O open · Ctrl+N new\n"
-            "Songs Y/X/P · Rows c/m/d · v sequencer · Alt+←/→ page · s save",
+            "d delete song/rows · Songs Y/X/P · v sequencer · s save",
             id="message",
         )
         yield Footer()
@@ -1555,31 +1558,40 @@ class ProjectBrowser(App[None]):
         self._refresh_state()
         self.notify("Swapped song slots in the draft")
 
+    def _confirm_song_deletion(self, *, keep_name: bool) -> None:
+        session = self.session
+        if session is None:
+            return
+        slot = self.active_song_slot
+        song = self.songs[slot]
+        operation = "clear_song" if keep_name else "empty_song"
+        description = "Clear all rows and keep the song name" if keep_name else "Remove the song name and all its rows"
+
+        def finish(confirmed: bool) -> None:
+            if not confirmed:
+                return
+            try:
+                session.stage({"type": operation, "slot": slot})
+            except Exception as exc:
+                self.notify(f"Could not delete song: {exc}", severity="error")
+                return
+            if self.session is session:
+                self.active_row_index = None
+                self.selected_row_indices.clear()
+                self._refresh_state()
+            self.notify("Song deletion staged")
+
+        self.push_screen(ConfirmModal(
+            "Clear song rows?" if keep_name else "Delete song?",
+            f"Song {slot:02d} — {song['name'] or '(unnamed)'}\n{description}. Patterns remain unchanged.",
+            "Delete",
+        ), finish)
+
     def action_clear_song(self) -> None:
-        if self.session is None:
-            return
-        try:
-            self.session.stage({"type": "clear_song", "slot": self.active_song_slot})
-        except Exception as exc:
-            self.notify(f"Could not clear song rows: {exc}", severity="error")
-            return
-        self.active_row_index = None
-        self.selected_row_indices.clear()
-        self._refresh_state()
-        self.notify("Cleared song rows in the draft; name kept.")
+        self._confirm_song_deletion(keep_name=True)
 
     def action_empty_song(self) -> None:
-        if self.session is None:
-            return
-        try:
-            self.session.stage({"type": "empty_song", "slot": self.active_song_slot})
-        except Exception as exc:
-            self.notify(f"Could not empty song slot: {exc}", severity="error")
-            return
-        self.active_row_index = None
-        self.selected_row_indices.clear()
-        self._refresh_state()
-        self.notify("Emptied song slot in the draft")
+        self._confirm_song_deletion(keep_name=False)
 
     def action_edit_repeat(self) -> None:
         row = self._selected_row()
@@ -1699,7 +1711,7 @@ class ProjectBrowser(App[None]):
         else:
             help_text = (
                 "↑↓ move rows · ←/→ move columns · Tab / ← at Pattern returns to songs · Enter edits cell\n"
-                "Songs Y/X/P bundle · Rows c/m/d · filled = playing · outline = muted · s save"
+                "d delete song/rows · Songs Y/X/P · Rows c/m · s save"
             )
         self.query_one("#message", Static).update(help_text)
 
@@ -1980,20 +1992,41 @@ class ProjectBrowser(App[None]):
         self.notify(f"{len(indices)} row(s) now use {pattern_label(pattern)}")
 
     def action_delete_row(self) -> None:
-        indices = self._active_row_indices()
-        if self.session is None or indices is None:
+        if self.session is None:
             return
+        if self.focused is self.query_one("#songs-list", NavigatorList):
+            self.action_empty_song()
+            return
+        if self.focused is not self.query_one("#rows-list", NavigatorList):
+            return
+        indices = self._active_row_indices()
+        if indices is None:
+            return
+        session = self.session
+        slot = self.active_song_slot
         previous_index = self.active_row_index
-        remaining = len(self.songs[self.active_song_slot]["rows"]) - len(indices)
-        self.session.stage({
-            "type": "delete_rows",
-            "slot": self.active_song_slot,
-            "rows": indices,
-        })
-        self.selected_row_indices.clear()
-        self.active_row_index = min(previous_index, remaining - 1) if remaining else None
-        self._refresh_state()
-        self.notify(f"Deleted {len(indices)} row(s) from the draft")
+        remaining = len(self.songs[slot]["rows"]) - len(indices)
+        row_numbers = ", ".join(f"{index + 1:02d}" for index in indices)
+
+        def finish(confirmed: bool) -> None:
+            if not confirmed:
+                return
+            try:
+                session.stage({"type": "delete_rows", "slot": slot, "rows": indices})
+            except Exception as exc:
+                self.notify(f"Could not delete rows: {exc}", severity="error")
+                return
+            if self.session is session:
+                self.selected_row_indices.clear()
+                self.active_row_index = min(previous_index or 0, remaining - 1) if remaining else None
+                self._refresh_state()
+            self.notify(f"Deleted {len(indices)} row(s) from the draft")
+
+        self.push_screen(ConfirmModal(
+            "Delete song rows?",
+            f"Delete row(s) {row_numbers} from song {slot:02d}? Patterns remain unchanged.",
+            "Delete",
+        ), finish)
 
     def action_undo_change(self) -> None:
         if self.session is None or not self.session.undo():
