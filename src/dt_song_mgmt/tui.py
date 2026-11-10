@@ -583,6 +583,7 @@ class ProjectBrowser(App[None]):
     TITLE = "Elektron Digi Song Mode Manager"
     SUB_TITLE = "Project browser"
     ROW_COLUMNS = ("pattern", "label", "repeat", "bpm", "length", "mutes")
+    ROW_WIDTHS = (14, 5, 3, 7, 4, 6)
     ROW_LABEL_OPTIONS = [(0, "(none)"), (1, "Pattern name")] + [
         (index, label) for index, label in enumerate(SONG_ROW_LABELS) if label
     ]
@@ -754,7 +755,12 @@ class ProjectBrowser(App[None]):
                     yield Static("", id="song-detail")
                 with Vertical(id="rows-pane"):
                     yield Static("SONG ROWS", id="rows-title", classes="pane-title")
-                    yield Static("  #  PATTERN/NAME       LABEL  REP   BPM   LEN  MUTES", id="rows-columns")
+                    labels = ("PATTERN/NAME", "LABEL", "REP", "BPM", "LEN", "MUTES")
+                    header = "    # " + " ".join(
+                        f"{label:>{width}}" if index in (3, 4) else f"{label:<{width}}"
+                        for index, (label, width) in enumerate(zip(labels, self.ROW_WIDTHS))
+                    )
+                    yield Static(header, id="rows-columns")
                     with VerticalScroll(id="rows-scroll"):
                         yield NavigatorList("", id="rows-list", classes="navigator-list")
                     yield Static("", id="row-detail")
@@ -1200,21 +1206,23 @@ class ProjectBrowser(App[None]):
             label = (row.get("label") or "—")[:5]
             row_lines.append(f"{marker}{check} {index + 1:02d} ")
             cells = (
-                ("pattern", f"{pattern_label(pattern_id):<3} {compact_name:<10}"),
+                ("pattern", f"{pattern_label(pattern_id):<3} {compact_name}"),
                 (
                     "label",
-                    f"{self._label_name(self.editing_label_idx) if self.editing_label_idx is not None and index == selected_row else label:<5}",
+                    self._label_name(self.editing_label_idx) if self.editing_label_idx is not None and index == selected_row else label,
                 ),
-                ("repeat", f"×{row['repeat']:<2}"),
-                ("bpm", f"{format_bpm(row['bpm_raw']):>7}"),
-                ("length", f"{format_length(row['length']):>4}"),
+                ("repeat", f"×{row['repeat']}"),
+                ("bpm", format_bpm(row['bpm_raw'])),
+                ("length", format_length(row['length'])),
                 ("mutes", "16 trk"),
             )
             for column, (field, value) in enumerate(cells):
                 style = None
                 if index == selected_row:
                     style = "reverse bold" if rows_focused and column == self.active_row_column else "bold"
-                row_lines.append(value, style=style)
+                width = self.ROW_WIDTHS[column]
+                formatted = f"{value:>{width}}" if column in (3, 4) else f"{value:<{width}}"
+                row_lines.append(formatted, style=style)
                 if column < len(cells) - 1:
                     row_lines.append(" ")
             row_lines.append("\n")
