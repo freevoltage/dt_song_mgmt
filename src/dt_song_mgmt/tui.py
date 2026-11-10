@@ -520,6 +520,10 @@ class NavigatorList(Static):
     """Focusable text list for the main song and row navigators."""
 
     can_focus = True
+    BINDINGS = [("tab", "switch_pane", "Switch pane")]
+
+    def action_switch_pane(self) -> None:
+        self.app.action_switch_pane()
 
     def _horizontal_target(self, event) -> bool:
         if event.key in {"left", "right"} and self.id == "rows-list":
@@ -532,7 +536,10 @@ class NavigatorList(Static):
                 self.app._show_song(self.app.active_song_slot)
             return True
         if event.key == "right" and self.id == "songs-list":
-            self.app.query_one("#rows-list", NavigatorList).focus()
+            if self.app.song_preview_visible:
+                self.app.query_one("#song-sequencer-grid", SongSequencerGrid).focus()
+            else:
+                self.app.query_one("#rows-list", NavigatorList).focus()
             return True
         if event.key == "right" and self.id == "rows-list":
             if self.app.active_row_column < len(self.app.ROW_COLUMNS) - 1:
@@ -559,13 +566,26 @@ class NavigatorList(Static):
 
 
 class SongWorkspace(Horizontal):
-    """Place the sequencer below the song panes when the terminal is narrow."""
+    """Make the song selector narrower when the terminal is narrow."""
 
     def on_resize(self, event) -> None:
-        self.set_class(event.size.width < 100, "compact")
+        self.set_class(event.size.width < 80, "compact")
 
 
 class SongSequencerGrid(Static):
+    can_focus = True
+    BINDINGS = [
+        ("up", "move_row(-1)", "Previous song row"),
+        ("down", "move_row(1)", "Next song row"),
+        ("pageup", "move_row(-12)", "Previous rows"),
+        ("pagedown", "move_row(12)", "Next rows"),
+        ("left", "page(-1)", "Previous page"),
+        ("right", "page(1)", "Next page"),
+        ("ctrl+up", "scroll_preview(-3)", "Scroll preview up"),
+        ("ctrl+down", "scroll_preview(3)", "Scroll preview down"),
+        ("tab", "switch_pane", "Switch pane"),
+    ]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._last_width = -1
@@ -575,6 +595,18 @@ class SongSequencerGrid(Static):
             self._last_width = event.size.width
             if self.app.song_preview_visible:
                 self.app._refresh_song_preview()
+
+    def action_move_row(self, delta: int) -> None:
+        self.app._move_cursor(delta)
+
+    def action_page(self, delta: int) -> None:
+        self.app.action_song_preview_page(delta)
+
+    def action_scroll_preview(self, delta: int) -> None:
+        self.app.action_scroll_song_preview(delta)
+
+    def action_switch_pane(self) -> None:
+        self.app.action_switch_pane()
 
 
 class ProjectBrowser(App[None]):
@@ -626,13 +658,11 @@ class ProjectBrowser(App[None]):
         layout: horizontal;
     }
     #song-workspace-main { width: 1fr; height: 1fr; }
-    #song-sequencer { display: none; width: 2fr; min-width: 25; border-left: solid $panel; padding: 0 1; }
+    #song-sequencer { display: none; width: 1fr; border-left: solid $panel; padding: 0 1; }
     #song-sequencer-grid { height: auto; }
-    #workspace.preview-visible #song-workspace-main { width: 3fr; }
+    #workspace.preview-visible #rows-pane { display: none; }
     #workspace.preview-visible #song-sequencer { display: block; }
-    #workspace.preview-visible.compact { layout: vertical; }
-    #workspace.preview-visible.compact #song-workspace-main { width: 100%; height: 1fr; }
-    #workspace.preview-visible.compact #song-sequencer { width: 100%; height: 9; border-left: none; border-top: solid $panel; }
+    #workspace.preview-visible.compact #songs-pane { width: 18; min-width: 14; }
     #songs-pane {
         width: 30;
         min-width: 24;
@@ -741,6 +771,16 @@ class ProjectBrowser(App[None]):
         self.song_preview_visible = False
         self.song_preview_page = 0
 
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        if self.song_preview_visible and isinstance(self.focused, SongSequencerGrid):
+            if action in {
+                "delete_row", "move_row_up", "move_row_down", "copy_row", "move_row",
+                "rename_song", "swap_song", "clear_song", "empty_song", "toggle_row_selection",
+                "export_song_file", "import_song_file",
+            }:
+                return False
+        return super().check_action(action, parameters)
+
     def compose(self) -> ComposeResult:
         with Horizontal(id="project-header"):
             yield Static("Loading project…", id="project-banner")
@@ -764,8 +804,8 @@ class ProjectBrowser(App[None]):
                     with VerticalScroll(id="rows-scroll"):
                         yield NavigatorList("", id="rows-list", classes="navigator-list")
                     yield Static("", id="row-detail")
-            with VerticalScroll(id="song-sequencer"):
-                yield SongSequencerGrid("", id="song-sequencer-grid")
+                with VerticalScroll(id="song-sequencer"):
+                    yield SongSequencerGrid("", id="song-sequencer-grid")
         yield Static("", id="mute-display")
         yield Static(
             "↑↓ rows · ←/→ columns · Tab panes · brackets switch projects · Ctrl+O open · Ctrl+N new\n"
@@ -1047,12 +1087,18 @@ class ProjectBrowser(App[None]):
     def action_switch_pane(self) -> None:
         self._cancel_label_edit()
         songs_list = self.query_one("#songs-list", NavigatorList)
-        rows_list = self.query_one("#rows-list", NavigatorList)
-        (rows_list if self.focused is songs_list else songs_list).focus()
+        other = (
+            self.query_one("#song-sequencer-grid", SongSequencerGrid)
+            if self.song_preview_visible else self.query_one("#rows-list", NavigatorList)
+        )
+        (other if self.focused is songs_list else songs_list).focus()
 
     def action_focus_song_rows(self) -> None:
         if self.focused is self.query_one("#songs-list", NavigatorList):
-            self.query_one("#rows-list", NavigatorList).focus()
+            if self.song_preview_visible:
+                self.query_one("#song-sequencer-grid", SongSequencerGrid).focus()
+            else:
+                self.query_one("#rows-list", NavigatorList).focus()
         elif self.focused is self.query_one("#rows-list", NavigatorList):
             if self._selected_row() is None:
                 return
@@ -1092,7 +1138,10 @@ class ProjectBrowser(App[None]):
                 self.active_row_index = None
                 self.selected_row_indices.clear()
                 self._refresh_state()
-        elif self.focused is rows_list and self.songs:
+        elif (
+            self.focused is rows_list
+            or (self.song_preview_visible and self.focused is self.query_one("#song-sequencer-grid", SongSequencerGrid))
+        ) and self.songs:
             rows = self.songs[self.active_song_slot]["rows"]
             if not rows:
                 self.active_row_index = None
@@ -1267,10 +1316,16 @@ class ProjectBrowser(App[None]):
         if self.session is None:
             self.notify("Open a project first", severity="warning")
             return
+        self._cancel_label_edit()
         self.song_preview_visible = not self.song_preview_visible
         self.query_one("#workspace", SongWorkspace).set_class(self.song_preview_visible, "preview-visible")
+        self.query_one("#mute-display", Static).display = not self.song_preview_visible
         if self.song_preview_visible:
             self._refresh_song_preview()
+            self.query_one("#song-sequencer-grid", SongSequencerGrid).focus()
+        else:
+            self.query_one("#rows-list", NavigatorList).focus()
+        self._update_main_help()
 
     def action_song_preview_page(self, delta: int) -> None:
         if self.song_preview_visible:
@@ -1301,7 +1356,14 @@ class ProjectBrowser(App[None]):
                     start = self.song_preview_page * 16
                     width = self.query_one("#song-sequencer-grid", SongSequencerGrid).size.width
                     cell_width = max(1, (width - 10) // 16)
-                    output.append(f"{pattern_label(row['pattern'])}  PAGE {self.song_preview_page + 1}\n", style="bold")
+                    song_name = self.songs[self.active_song_slot]["name"].strip() or "(unnamed)"
+                    row_label = row.get("label") or ""
+                    label_text = f" · {row_label}" if row_label and row_label != "—" else ""
+                    output.append(
+                        f"{song_name} · ROW {self.active_row_index + 1:02d}/{len(rows):02d} · "
+                        f"{pattern_label(row['pattern'])}{label_text} · PAGE {self.song_preview_page + 1}\n",
+                        style="bold",
+                    )
                     output.append("      " + " ".join(
                         str(group + 1).ljust(cell_width * 4)
                         for group in (0, 4, 8, 12)
@@ -1315,7 +1377,7 @@ class ProjectBrowser(App[None]):
                             if step % 4 == 3 and step != 15:
                                 output.append(" ")
                         output.append("\n")
-                    output.append("\nM = muted in this song row\nAlt+←/→ page · Ctrl+↑/↓ scroll", style="dim")
+                    output.append("\nM = muted in this song row\n↑/↓ row · ←/→ page · v rows", style="dim")
         self.query_one("#song-sequencer-grid", SongSequencerGrid).update(output)
 
     def _selected_row(self) -> dict | None:
@@ -1630,7 +1692,9 @@ class ProjectBrowser(App[None]):
     def _update_main_help(self) -> None:
         if not self.is_mounted:
             return
-        if self.editing_label_idx is not None:
+        if self.song_preview_visible:
+            help_text = "SEQUENCER · ↑↓ song rows · ←/→ pages · Tab songs · v row table\nM = muted · Ctrl+↑/↓ scroll · s save"
+        elif self.editing_label_idx is not None:
             help_text = "LABEL · ↑↓ choose · Enter apply · Esc cancel\nSelect a label; changes remain draft until s"
         else:
             help_text = (
