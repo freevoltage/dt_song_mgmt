@@ -127,6 +127,20 @@ class PatternList(Static):
             self.screen.query_one("#pattern-preview", VerticalScroll).scroll_relative(y=delta, animate=False)
 
 
+class SequencerGrid(Static):
+    """Redraw step spacing when the available preview width changes."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_width = -1
+
+    def on_resize(self, event) -> None:
+        if event.size.width != self._last_width:
+            self._last_width = event.size.width
+            if self.screen.preview_visible:
+                self.screen._refresh_preview(self.screen.session.working_raw())
+
+
 class PatternManagerScreen(ModalScreen[None]):
     """Search and stage operations on the 128 pattern slots."""
 
@@ -141,10 +155,12 @@ class PatternManagerScreen(ModalScreen[None]):
     #pattern-bank-title { height: 1; text-style: bold; }
     #pattern-banks { height: auto; }
     #pattern-results { width: 1fr; padding-left: 1; }
-    #pattern-preview { display: none; width: 30; border-left: solid $panel; padding: 0 1; }
+    #pattern-preview { display: none; width: 1fr; min-width: 25; border-left: solid $panel; padding: 0 1; }
     #pattern-preview-grid { height: auto; }
     PatternManagerScreen.preview-visible #pattern-preview { display: block; }
+    PatternManagerScreen.preview-visible #pattern-results { width: 32; }
     PatternManagerScreen.preview-visible.compact #pattern-bank-pane { display: none; }
+    PatternManagerScreen.preview-visible.compact #pattern-results { width: 20; }
     #pattern-count { height: 1; }
     #pattern-search { height: 3; margin: 1 0; }
     #pattern-columns { height: 1; }
@@ -211,7 +227,7 @@ class PatternManagerScreen(ModalScreen[None]):
                     with VerticalScroll(id="pattern-scroll"):
                         yield PatternList("", id="pattern-list")
                 with VerticalScroll(id="pattern-preview"):
-                    yield Static("", id="pattern-preview-grid")
+                    yield SequencerGrid("", id="pattern-preview-grid")
             yield Static("", id="pattern-selection")
             yield Static(
                 "↑/↓ browse · 1–8 banks · 0 all · / filter · v sequencer · ←/→ steps\n"
@@ -317,13 +333,22 @@ class PatternManagerScreen(ModalScreen[None]):
                 output.append(f"Cannot read trigs: {exc}")
             else:
                 start = self.preview_page * 16
+                width = self.query_one("#pattern-preview-grid", SequencerGrid).size.width
+                cell_width = max(1, (width - 8) // 16)
                 output.append(f"{pattern_label(self.selected_pattern)}  STEPS {start + 1:03}–{start + 16:03}\n", style="bold")
-                output.append("     " + "  ".join(f"{start + n:03}" for n in (1, 5, 9, 13)) + "\n", style="dim")
+                if cell_width >= max(3, len(str(start + 16))):
+                    header = " ".join(
+                        "".join(f"{start + step + 1:0{len(str(start + 16))}d}".center(cell_width) for step in range(group, group + 4))
+                        for group in (0, 4, 8, 12)
+                    )
+                else:
+                    header = " ".join(f"{start + group + 1:03}".ljust(cell_width * 4) for group in (0, 4, 8, 12)).rstrip()
+                output.append("     " + header + "\n", style="dim")
                 for index, steps in enumerate(tracks):
                     output.append(f"T{index + 1:02}  ")
                     for step in range(16):
                         active = steps[start + step]
-                        output.append("●" if active else "·", style="bold" if active else "dim")
+                        output.append(("●" if active else "·").center(cell_width), style="bold" if active else "dim")
                         if step % 4 == 3 and step != 15:
                             output.append(" ")
                     output.append("\n")
