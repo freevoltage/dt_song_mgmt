@@ -124,13 +124,13 @@ def parse_song_row(row: bytes, pattern_names: list[str] | None = None, *, device
     saved = ""
     if pattern_names and 0 <= pat < len(pattern_names):
         saved = pattern_names[pat]
-    tag_id = row[2] if device == "DN2" else row[1]
+    tag_id = row[2]
     return {
         "pattern": pat,
         "pattern_name": slot,
         "label_idx": tag_id,
         "label": row_label(tag_id, pat, saved),
-        "repeat": row[1] + 1 if device == "DN2" else row[2],
+        "repeat": row[1] + 1,
         "bpm_raw": struct.unpack_from(">I", row, 3)[0],
         "mute": mute,
         "mute_mask": mute,
@@ -541,12 +541,9 @@ def update_row_fields(rec: bytes, row_indices: list[int], updates: dict, *, devi
             row = rows[idx]
             if "repeat" in updates and updates["repeat"] is not None:
                 repeat = int(updates["repeat"])
-                if device == "DN2":
-                    if not 1 <= repeat <= 99:
-                        raise ValueError("Digitone II repeat must be between 1 and 99")
-                    row[1] = repeat - 1
-                else:
-                    row[2] = repeat & 0xFF
+                if not 1 <= repeat <= 99:
+                    raise ValueError("Repeat must be between 1 and 99")
+                row[1] = repeat - 1
             if "bpm_raw" in updates and updates["bpm_raw"] is not None:
                 struct.pack_into(">I", row, 3, int(updates["bpm_raw"]) & 0xFFFFFFFF)
             if "mute_mask" in updates and updates["mute_mask"] is not None:
@@ -558,5 +555,5 @@ def update_row_fields(rec: bytes, row_indices: list[int], updates: dict, *, devi
             if "pattern" in updates and updates["pattern"] is not None:
                 row[0] = int(updates["pattern"]) & 0x7F
             if "label_idx" in updates and updates["label_idx"] is not None:
-                row[2 if device == "DN2" else 1] = int(updates["label_idx"]) & 0xFF
+                row[2] = int(updates["label_idx"]) & 0xFF
     return set_song_rows(rec, rows)

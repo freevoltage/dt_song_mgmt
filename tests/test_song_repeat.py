@@ -37,8 +37,13 @@ class SongRepeatTests(unittest.TestCase):
         self.assertEqual(get_all_songs_info(labelled)[0]['rows'][0]['label'], 'INTRO')
         self.assertEqual(get_all_songs_info(labelled)[0]['rows'][0]['repeat'], 1)
 
-    def test_digitakt_keeps_existing_encoding_until_verified(self):
+    def test_digitakt_uses_same_song_row_encoding(self):
         raw = project(DT2_IMAGE_SIZE)
-        self.assertEqual([r['repeat'] for r in get_all_songs_info(raw)[0]['rows']], [3] * 16)
+        self.assertEqual([r['repeat'] for r in get_all_songs_info(raw)[0]['rows']], list(range(1, 17)))
         changed = apply_operations(raw, [{'type': 'update_rows', 'slot': 0, 'rows': [0], 'updates': {'repeat': 2}}])
-        self.assertEqual(get_song_rows(get_song_slots(changed)[0])[0][2], 2)
+        row = get_song_rows(get_song_slots(changed)[0])[0]
+        self.assertEqual((row[1], row[2]), (1, 3))
+        labelled = apply_operations(changed, [{'type': 'update_rows', 'slot': 0, 'rows': [0], 'updates': {'label_idx': 2}}])
+        row = get_song_rows(get_song_slots(labelled)[0])[0]
+        self.assertEqual((row[1], row[2]), (1, 2))
+        self.assertEqual(get_all_songs_info(labelled)[0]['rows'][0]['label'], 'INTRO')
