@@ -618,7 +618,7 @@ class ProjectBrowser(App[None]):
     TITLE = "Elektron Digi Song Mode Manager"
     SUB_TITLE = "Project browser"
     ROW_COLUMNS = ("pattern", "label", "repeat", "bpm", "length", "mutes")
-    ROW_WIDTHS = (14, 5, 3, 7, 4, 6)
+    ROW_WIDTHS = (14, 6, 3, 7, 4, 6)
     ROW_LABEL_OPTIONS = [(0, "(none)"), (1, "Pattern name")] + [
         (index, label) for index, label in enumerate(SONG_ROW_LABELS) if label
     ]
@@ -1257,13 +1257,13 @@ class ProjectBrowser(App[None]):
             marker = ">" if index == selected_row else " "
             check = "✓" if index in self.selected_row_indices else " "
             compact_name = (custom_name.strip() or "(unnamed)")[:10]
-            label = (row.get("label") or "—")[:5]
+            label = (row.get("label") or "—")[:6]
             row_lines.append(f"{marker}{check} {index + 1:02d} ")
             cells = (
                 ("pattern", f"{pattern_label(pattern_id):<3} {compact_name}"),
                 (
                     "label",
-                    self._label_name(self.editing_label_idx)[:5] if self.editing_label_idx is not None and index == selected_row else label,
+                    self._label_name(self.editing_label_idx)[:6] if self.editing_label_idx is not None and index == selected_row else label,
                 ),
                 ("repeat", f"×{row['repeat']}"),
                 ("bpm", format_bpm(row['bpm_raw'])),

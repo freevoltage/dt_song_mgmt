@@ -108,4 +108,4 @@ Older arrangement-only JSON exports can still restore all songs and their row mu
 
 ## TODO
 
-- **Song row labels** — Verify the complete label mapping against both devices. Digitone II INTRO and OUTRO have been checked on hardware; The same song-row encoding is used for Digitakt II; its hardware behavior remains to be verified.
+- **Digitakt II song rows** — The shared song-row encoding and labels have been checked against Digitone II; verify the same behavior on Digitakt II hardware.

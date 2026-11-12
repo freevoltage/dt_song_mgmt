@@ -26,18 +26,9 @@ SONG_TRACKS = 16
 BPM_SCALE = 120
 
 SONG_ROW_LABELS: tuple[str | None, ...] = (
-    None,
-    None,
-    "INTRO",
-    "OUTRO",
-    "CHORUS",
-    "SOLO",
-    "FILL",
-    "PEAK",
-    "JAM",
-    "NOISE",
-    "MISC",
-    "PAUSE",
+    None, None, "INTRO", "OUTRO", "BRIDGE", "CHORUS", "VERSE", "SOLO",
+    "FILL", "RISE", "PEAK", "DROP", "BREAK", "JAM", "NOISE", "FX",
+    "FADE", "MISC", None, "PAUSE", "OTHER",
 )
 
 PATTERN_SLOTS = 128

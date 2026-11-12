@@ -209,7 +209,7 @@ Located at pat_base + 0x15AD4 (DN2) / pat_base + 0x15AA4 (DT2):
 - 29-byte Song Row Structure:
   - Byte 0: Pattern Index (0..127 -> Bank A..H, Pat 01..16)
   - Byte 1: Repeat value minus 1 (verified on Digitone II for values 1–16; assumed shared with Digitakt II).
-  - Byte 2: Label ID (INTRO = 2, OUTRO = 3 verified on Digitone II; assumed shared with Digitakt II).
+  - Byte 2: Label ID: INTRO through MISC = 2–17, PAUSE = 19, OTHER = 20 (verified on Digitone II; assumed shared with Digitakt II). ID 18 is unverified.
   - Byte 3..6: 32-bit BPM Override (raw = BPM \* 120, 0 = Inherit pattern BPM)
   - Byte 7..8: 16-Track Mute Bitmask (Bit 0..15 = Track 1..16 Muted)
   - Byte 9..10: Row Step Length (1..1024 steps)
