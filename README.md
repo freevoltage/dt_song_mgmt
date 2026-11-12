@@ -109,3 +109,9 @@ Older arrangement-only JSON exports can still restore all songs and their row mu
 ## TODO
 
 - **Digitakt II song rows** — The shared song-row encoding and labels have been checked against Digitone II; verify the same behavior on Digitakt II hardware.
+
+## Automated tests
+
+Run `python -m unittest discover -s tests -v` from the repository root after
+installing the project. See [Testing DSM](docs/TESTING.md) for coverage, focused
+commands, CI setup, and the remaining hardware checks.
