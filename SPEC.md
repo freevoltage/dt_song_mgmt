@@ -208,7 +208,8 @@ Located at pat_base + 0x15AD4 (DN2) / pat_base + 0x15AA4 (DT2):
 - Active Row Count Sentinel: Song Base + 0x0B4B (or +0x0E61)
 - 29-byte Song Row Structure:
   - Byte 0: Pattern Index (0..127 -> Bank A..H, Pat 01..16)
-  - Byte 2: Repeat Count (1..99)
+  - Byte 1: Repeat value minus 1 (verified on Digitone II for values 1–16; assumed shared with Digitakt II).
+  - Byte 2: Label ID: INTRO through MISC = 2–17, PAUSE = 19, OTHER = 20 (verified on Digitone II; assumed shared with Digitakt II). ID 18 is unverified.
   - Byte 3..6: 32-bit BPM Override (raw = BPM \* 120, 0 = Inherit pattern BPM)
   - Byte 7..8: 16-Track Mute Bitmask (Bit 0..15 = Track 1..16 Muted)
   - Byte 9..10: Row Step Length (1..1024 steps)
@@ -225,7 +226,7 @@ In `FUN_4007e970` (Playlist Row Drawer) and `FUN_40081192` (Cue Row Drawer):
 
 ```
 // 1. Read Row Tag ID and Pattern Index
-uVar8  = FUN_40049a26(song, row_idx);   // Tag ID from Row (+0x01 on disk / +0x18 in RAM)
+uVar8  = FUN_40049a26(song, row_idx);   // Tag ID; disk offset requires verification
 uVar11 = FUN_40049716(song, row_idx);   // Pattern Index from Row (+0x00 on disk / +0x10 in RAM)
 
 // 2. Fetch the Pattern object for that pattern index

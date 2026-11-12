@@ -6,8 +6,9 @@ import base64
 import hashlib
 import json
 import shutil
+from uuid import uuid4
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .constants import (
     DT2_IMAGE_SIZE,
@@ -66,7 +67,7 @@ class ProjectSession:
 
     def _file_fingerprint(self) -> tuple[int, int, int, int]:
         """Return a cheap signature for detecting edits from another session."""
-        stat = self.path.stat()
+        stat = getattr(self, "_source_path", self.path).stat()
         return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
 
     def _load(self) -> None:
@@ -74,7 +75,80 @@ class ProjectSession:
         self.head, self.base_raw = unpack_project(self.payload)
         self.name = payload_name(self.manifest)
         self.device = device_name(self.base_raw, self.path.suffix)
+        self._source_path = self.path
+        self.is_new_project = False
+        self.display_name = self.path.name
+        self.template_label = ""
+        self.suggested_save_path = self.path
         self._fingerprint = self._file_fingerprint()
+
+    @classmethod
+    def empty_draft_from(cls, template: "ProjectSession") -> "ProjectSession":
+        """Create an unsaved, empty project draft using an open project as its format template."""
+        if template.device not in {"DT2", "DN2"}:
+            raise ValueError("an open Digitakt II or Digitone II project is required as the format template")
+        draft = cls.__new__(cls)
+        template_raw = template.working_raw()
+        blank_raw = cls._empty_project_image(template_raw, template.device)
+        draft.path = template.path.with_name(f".dsm-draft-{uuid4().hex}{template.path.suffix}")
+        draft._source_path = template._source_path
+        draft._fingerprint = template._fingerprint
+        draft.is_new_project = True
+        device_label = "Digitakt II" if template.device == "DT2" else "Digitone II"
+        draft.display_name = f"New {device_label} Project"
+        draft.template_label = template.display_name
+        default_name = draft.display_name
+        suggested = template.path.with_name(f"{default_name}{template.path.suffix}")
+        suffix = 2
+        while suggested.exists():
+            suggested = template.path.with_name(f"{default_name} {suffix}{template.path.suffix}")
+            suffix += 1
+        draft.suggested_save_path = suggested
+        draft.members = template.working_members()
+        sample_hashes = [
+            cls._entry_hash(entry)
+            for entry in cls._manifest_entries(draft.members)
+        ]
+        draft.members = apply_asset_delta(draft.members, removals=sample_hashes)
+        manifest_data = next(
+            data for info, data in draft.members if info.filename == "manifest.json"
+        )
+        draft.manifest = json.loads(manifest_data)
+        draft.head = template.head
+        draft.base_raw = blank_raw
+        draft.payload = pack_project(draft.head, blank_raw)
+        draft.name = template.name
+        draft.device = template.device
+        draft.operations = []
+        draft.redo_operations = []
+        return draft
+
+    @staticmethod
+    def _empty_project_image(raw: bytes, device: str) -> bytes:
+        patched = bytearray(raw)
+        pattern_block = bytes(PATTERN_STRIDE)
+        kit_size = kit_stride(raw)
+        kit_block = bytes(kit_size)
+        for pattern_index in range(PATTERN_SLOTS):
+            pattern_start = PATTERN_BASE + pattern_index * PATTERN_STRIDE
+            kit_start = KIT_BASE + pattern_index * kit_size
+            if pattern_start + PATTERN_STRIDE > len(patched) or kit_start + kit_size > len(patched):
+                raise ValueError("project image is too short to create an empty project")
+            patched[pattern_start:pattern_start + PATTERN_STRIDE] = pattern_block
+            patched[kit_start:kit_start + kit_size] = kit_block
+        blank = bytes(patched)
+        empty_song = empty_song_template(blank, song_table_off(blank))
+        blank = set_song_slots(blank, [empty_song] * SONG_SLOTS)
+        if device == "DT2":
+            from .dt2_samples import clear_sample_pool_hashes, sample_pool_rows
+            pool_hashes = {
+                row.sample_hash
+                for row in sample_pool_rows(blank)
+                if row is not None
+            }
+            if pool_hashes:
+                blank = clear_sample_pool_hashes(blank, pool_hashes)
+        return blank
 
     def stage(self, operation: dict) -> None:
         """Append one operation after validating the resulting working image."""
@@ -154,6 +228,23 @@ class ProjectSession:
                 slots = get_song_slots(raw)
                 slots[destination] = record
                 raw = set_song_slots(raw, slots)
+            elif op_type == "song_arrangement_paste":
+                destination = self._song_slot(operation.get("dst_slot"), "destination")
+                try:
+                    record = base64.b64decode(operation["song_data"], validate=True)
+                except (KeyError, ValueError, TypeError):
+                    raise ValueError("song arrangement data is missing or invalid") from None
+                if len(record) != SONG_SIZE:
+                    raise ValueError(f"song arrangement must be exactly {SONG_SIZE} bytes")
+                slots = get_song_slots(raw)
+                source_slot = operation.get("clear_source_slot")
+                if source_slot is not None:
+                    source_slot = self._song_slot(source_slot, "source")
+                    if source_slot == destination:
+                        raise ValueError("choose a different destination song slot")
+                    slots[source_slot] = empty_song_template(raw, song_table_off(raw))
+                slots[destination] = record
+                raw = set_song_slots(raw, slots)
             elif op_type == "song_import":
                 source_path = Path(operation["src_path"]).expanduser().resolve()
                 if source_path == self.path:
@@ -215,6 +306,9 @@ class ProjectSession:
                     raw = clear_sample_pool_hashes(raw, set(operation["release_hashes"]))
             else:
                 raw = apply_operations(raw, [operation])
+                if op_type == "pattern_move" and self.device == "DT2" and operation.get("release_hashes"):
+                    from .dt2_samples import clear_sample_pool_hashes
+                    raw = clear_sample_pool_hashes(raw, set(operation["release_hashes"]))
         return raw
 
     @staticmethod
@@ -285,7 +379,7 @@ class ProjectSession:
         raw = self.working_raw()
         return {
             "project_name": self.name,
-            "project_file": self.path.name,
+            "project_file": self.display_name if self.is_new_project else self.path.name,
             "device": self.device,
             "songs": get_all_songs_info(raw),
             "patterns": get_all_patterns_info(raw),
@@ -293,7 +387,7 @@ class ProjectSession:
         }
 
     def validate_save_as(self, destination: Path | str) -> list[dict]:
-        """Check a staged draft and its proposed Save As destination."""
+        """Validate a staged draft and the destination it will be written to."""
         target = Path(destination).expanduser().resolve()
         checks: list[dict] = []
 
@@ -306,13 +400,20 @@ class ProjectSession:
             "pass" if extension_ok else "fail",
             f"{target.suffix or '(none)'} matches {self.path.suffix}" if extension_ok else f"Keep the {self.path.suffix} extension for this device.",
         )
-        same_path = target == self.path
+        same_path = target == self.path and not self.is_new_project
+        template_path = self.is_new_project and target == self._source_path
+        if template_path:
+            destination_detail = "Choose a different path; the project used as the template stays unchanged."
+        elif same_path:
+            destination_detail = "Save over the current project; a .bak copy will be kept."
+        elif not target.parent.is_dir():
+            destination_detail = f"Destination folder does not exist: {target.parent}"
+        else:
+            destination_detail = str(target)
         add(
             "Save destination",
-            "fail" if same_path or not target.parent.is_dir() else "pass",
-            "Choose a new path; the source project remains unchanged." if same_path else (
-                f"Destination folder does not exist: {target.parent}" if not target.parent.is_dir() else str(target)
-            ),
+            "fail" if template_path or not target.parent.is_dir() else "pass",
+            destination_detail,
         )
         try:
             unchanged = self._file_fingerprint() == self._fingerprint
@@ -324,7 +425,7 @@ class ProjectSession:
             "Source file is unchanged on disk." if unchanged else "Source file changed during this session; reload it before saving.",
         )
 
-        if not extension_ok or same_path or not target.parent.is_dir() or not unchanged:
+        if not extension_ok or template_path or not target.parent.is_dir() or not unchanged:
             return checks
 
         try:
@@ -428,7 +529,7 @@ class ProjectSession:
         pattern_names = collect_pattern_names(new_raw)
         songs = []
         for index, record in enumerate(get_song_slots(new_raw)):
-            info = get_song_info(record, pattern_names)
+            info = get_song_info(record, pattern_names, device=device_name(new_raw, self.path.suffix))
             info["slot"] = index
             songs.append(info)
 
@@ -502,7 +603,7 @@ class ProjectSession:
         return {
             "backup_format": "dsm-project-state",
             "version": 1,
-            "project_file": self.path.name,
+            "project_file": self.display_name if self.is_new_project else self.path.name,
             "project_name": self.name,
             "device": self.device,
             "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -566,10 +667,14 @@ class ProjectSession:
         if source == self.path:
             raise ValueError("choose a different source project")
         pairs = validate_pattern_mapping(mappings)
-        if source_manifest is None or source_members is None:
-            source_manifest, _source_payload, source_members = read_project(source)
+        if source_raw is None or source_manifest is None or source_members is None:
+            loaded_manifest, _source_payload, loaded_members = read_project(source)
             if source_raw is None:
                 _source_head, source_raw = unpack_project(_source_payload)
+            if source_manifest is None:
+                source_manifest = loaded_manifest
+            if source_members is None:
+                source_members = loaded_members
         operation = {
             "type": "pattern_import",
             "src_path": str(source),
@@ -581,13 +686,42 @@ class ProjectSession:
                 "source_image_length": len(source_raw),
                 "source_image_sha256": hashlib.sha256(source_raw).hexdigest(),
             })
-        if self.device == "DT2" and source_raw is not None:
+        if self.device == "DT2":
+            assert source_raw is not None and source_manifest is not None and source_members is not None
             operation["asset_additions"] = self._sample_asset_additions(
                 source_raw,
                 source_manifest,
                 source_members,
                 [src for src, _dst in pairs],
+                source,
             )
+        self.stage(operation)
+
+    def stage_pattern_move(self, src_idx: int, dst_idx: int) -> None:
+        """Stage an in-project pattern move and release unreferenced DT2 samples."""
+        pairs = validate_pattern_mapping([{"src_idx": src_idx, "dst_idx": dst_idx}])
+        source, destination = pairs[0]
+        if source == destination:
+            raise ValueError("source and destination are the same pattern")
+        operation = {"type": "pattern_move", "src_idx": source, "dst_idx": destination}
+        if self.device == "DT2":
+            raw = self.working_raw()
+            try:
+                removed_hashes = set()
+                for index in (source, destination):
+                    removed_hashes.update(pattern_sample_hashes(raw, index))
+                moved_raw = apply_operations(raw, [operation])
+                retained_hashes = set()
+                for pattern in get_all_patterns_info(moved_raw):
+                    retained_hashes.update(pattern_sample_hashes(moved_raw, pattern["index"]))
+                release_hashes = sorted(removed_hashes - retained_hashes)
+            except ValueError:
+                # Unknown references make sample cleanup unsafe; moving the
+                # pattern itself can still retain all pool rows and WAVs.
+                release_hashes = []
+            if release_hashes:
+                operation["release_hashes"] = release_hashes
+                operation["asset_removals"] = release_hashes
         self.stage(operation)
 
     def stage_song_bundle_import(
@@ -627,7 +761,7 @@ class ProjectSession:
         }
         if self.device == "DT2":
             operation["asset_additions"] = self._sample_asset_additions(
-                source_raw, source_manifest, source_members, [src for src, _dst in pairs]
+                source_raw, source_manifest, source_members, [src for src, _dst in pairs], source
             )
         self.stage(operation)
 
@@ -689,30 +823,178 @@ class ProjectSession:
         source_manifest: dict,
         source_members: list[tuple],
         pattern_indices: list[int],
+        source_path: Path | None = None,
     ) -> list[dict]:
-        """Capture only manifest-backed WAV assets needed by copied patterns."""
+        """Capture WAV assets needed by copied patterns from the project or nearby library."""
         needed_hashes: set[int] = set()
+        sample_details: dict[int, dict] = {}
         for pattern_index in set(pattern_indices):
-            needed_hashes.update(pattern_sample_hashes(source_raw, pattern_index))
+            details = pattern_sample_hashes(source_raw, pattern_index)
+            needed_hashes.update(details)
+            for sample_hash, detail in details.items():
+                existing = sample_details.setdefault(sample_hash, {
+                    "default_tracks": set(),
+                    "locked_tracks": set(),
+                    "pool_slots": set(),
+                    "size": detail["size"],
+                })
+                existing["default_tracks"].update(detail["default_tracks"])
+                existing["locked_tracks"].update(detail["locked_tracks"])
+                existing["pool_slots"].update(detail["pool_slots"])
+                if existing["size"] is None:
+                    existing["size"] = detail["size"]
         manifest_by_hash: dict[int, dict] = {}
         for entry in source_manifest.get("Samples", []):
             try:
-                manifest_by_hash[int(entry["Hash"])] = entry
+                manifest_by_hash.setdefault(int(entry["Hash"]), entry)
             except (KeyError, TypeError, ValueError):
                 continue
         member_data = {info.filename: data for info, data in source_members}
         additions = []
-        for sample_hash in sorted(needed_hashes & manifest_by_hash.keys()):
+        missing_by_hash: dict[int, dict] = {}
+        missing_assets = []
+        for sample_hash in sorted(needed_hashes):
+            if sample_hash not in manifest_by_hash:
+                detail = sample_details[sample_hash]
+                # A device reference alone does not include the sample audio.
+                missing_by_hash[sample_hash] = detail
+                continue
             entry = manifest_by_hash[sample_hash]
             filename = str(entry.get("FileName", ""))
             if not filename or filename not in member_data:
-                raise ValueError(f"source project is missing sample asset for hash {sample_hash:08X}")
+                missing_by_hash[sample_hash] = sample_details[sample_hash]
+                continue
             additions.append({
                 "entry": entry,
                 "filename": filename,
                 "data_base64": base64.b64encode(member_data[filename]).decode("ascii"),
             })
+        device_available_hashes: set[int] = set()
+        if missing_by_hash and source_path is not None:
+            library_additions, device_available_hashes = (
+                ProjectSession._nearby_digitakt_asset_additions(source_path, missing_by_hash)
+            )
+            additions.extend(library_additions)
+        available_hashes = {
+            int(addition["entry"]["Hash"])
+            for addition in additions
+        }
+        for sample_hash, detail in missing_by_hash.items():
+            if sample_hash in available_hashes or sample_hash in device_available_hashes:
+                continue
+            tracks = sorted(detail["default_tracks"] | detail["locked_tracks"])
+            track_names = ", ".join(f"T{track + 1}" for track in tracks) or "unknown tracks"
+            missing_assets.append(f"{sample_hash:08X} ({track_names})")
+        if missing_assets:
+            missing = ", ".join(missing_assets)
+            raise ValueError(
+                "cannot copy this Digitakt pattern because audio is missing from the project "
+                f"archive and nearby Digitakt sample libraries: {missing}. Download the missing WAV files to the indexed library and retry."
+            )
         return additions
+
+    @staticmethod
+    def _nearby_digitakt_asset_additions(
+        source_path: Path,
+        missing: dict[int, dict],
+    ) -> tuple[list[dict], set[int]]:
+        """Resolve requested samples from nearby libraries or installed factory references."""
+        roots: list[Path] = []
+        current = source_path.expanduser().resolve().parent
+        for _depth in range(3):
+            marker = current / ".digitakt-manifest.json"
+            if marker.is_file() and current not in roots:
+                roots.append(current)
+            try:
+                children = list(current.iterdir())
+            except OSError:
+                children = []
+            for child in children:
+                if (
+                    child.is_dir()
+                    and (child / ".digitakt-manifest.json").is_file()
+                    and child not in roots
+                ):
+                    roots.append(child)
+            current = current.parent
+
+        digitakt_folder = Path.home() / "Music" / "Digitakt"
+        try:
+            for child in digitakt_folder.iterdir():
+                if child.is_dir() and (child / ".digitakt-manifest.json").is_file() and child not in roots:
+                    roots.append(child)
+        except OSError:
+            pass
+
+        candidates: dict[int, list[tuple[Path, str]]] = {}
+        for root in roots:
+            marker = root / ".digitakt-manifest.json"
+            try:
+                library = json.loads(marker.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            files = library.get("files", {}) if isinstance(library, dict) else {}
+            if not isinstance(files, dict):
+                continue
+            for relative, metadata in files.items():
+                if not isinstance(relative, str) or not isinstance(metadata, dict):
+                    continue
+                try:
+                    value = metadata.get("hash")
+                    if isinstance(value, str):
+                        normalized = value.strip().lower()
+                        sample_hash = int(
+                            normalized,
+                            16
+                            if normalized.startswith("0x") or len(normalized.removeprefix("0x")) <= 8
+                            else 10,
+                        )
+                    else:
+                        sample_hash = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if sample_hash in missing:
+                    candidates.setdefault(sample_hash, []).append((root, relative))
+
+        additions = []
+        device_available_hashes: set[int] = set()
+        for sample_hash, paths in candidates.items():
+            for root, relative in paths:
+                library_path = PurePosixPath(relative)
+                if library_path.is_absolute() or ".." in library_path.parts:
+                    continue
+                root_resolved = root.resolve()
+                try:
+                    wav_path = (root / Path(*library_path.parts)).resolve()
+                    wav_path.relative_to(root_resolved)
+                    data = wav_path.read_bytes()
+                except ValueError:
+                    continue
+                except OSError:
+                    if library_path.parts and library_path.parts[0].casefold() == "factory":
+                        device_available_hashes.add(sample_hash)
+                    continue
+                if not data:
+                    continue
+                sample_size = missing[sample_hash].get("size")
+                if not isinstance(sample_size, int) or sample_size <= 16:
+                    continue
+                # DT2's pool row size is 16 bytes larger than the FileSize
+                # recorded in known project manifests for the same hash.
+                filename = library_path.as_posix()
+                if not filename.startswith("Samples/"):
+                    filename = f"Samples/{filename}"
+                additions.append({
+                    "entry": {
+                        "FileName": filename,
+                        "FileSize": sample_size - 16,
+                        "Hash": str(sample_hash),
+                    },
+                    "filename": filename,
+                    "data_base64": base64.b64encode(data).decode("ascii"),
+                })
+                break
+        return additions, device_available_hashes
 
     def stage_song_file_restore(self, dst_slot: int, record: bytes) -> None:
         destination = self._song_slot(dst_slot, "destination")
@@ -723,6 +1005,21 @@ class ProjectSession:
             "dst_slot": destination,
             "song_data": base64.b64encode(record).decode("ascii"),
         })
+
+    def stage_song_arrangement_paste(
+        self, dst_slot: int, record: bytes, clear_source_slot: int | None = None,
+    ) -> None:
+        """Paste one song record, optionally clearing its source in the same draft."""
+        destination = self._song_slot(dst_slot, "destination")
+        if len(record) != SONG_SIZE:
+            raise ValueError(f"song arrangement must be exactly {SONG_SIZE} bytes")
+        operation = {
+            "type": "song_arrangement_paste", "dst_slot": destination,
+            "song_data": base64.b64encode(record).decode("ascii"),
+        }
+        if clear_source_slot is not None:
+            operation["clear_source_slot"] = self._song_slot(clear_source_slot, "source")
+        self.stage(operation)
 
     def stage_song_import(
         self,
@@ -752,6 +1049,8 @@ class ProjectSession:
 
     def apply(self) -> Path:
         """Back up and atomically write the current draft to its project file."""
+        if self.is_new_project:
+            raise ValueError("a new project must be saved to a new project path")
         if not self.operations:
             raise ValueError("there are no staged changes to apply")
         if self._file_fingerprint() != self._fingerprint:
@@ -768,10 +1067,10 @@ class ProjectSession:
         return backup
 
     def save_as(self, destination: Path | str) -> Path:
-        """Write the staged project image to a new project file and continue there."""
+        """Write the staged image, keeping a backup if the destination exists."""
         target = Path(destination).expanduser().resolve()
-        if target == self.path:
-            raise ValueError("choose a new path; the source project is kept unchanged")
+        if self.is_new_project and target == self._source_path:
+            raise ValueError("choose a different path; the project used as the template is kept unchanged")
         if target.suffix.lower() != self.path.suffix.lower():
             raise ValueError(f"project must keep its {self.path.suffix} device extension")
         if not target.parent.is_dir():

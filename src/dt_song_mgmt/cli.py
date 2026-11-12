@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from .constants import device_name
 from .project import read_project, write_project, unpack_project, pack_project, payload_name, patch_project_name
 from .songs import get_song_slots, song_name, collect_pattern_names, get_song_info, get_all_songs_info
 from .web.server import run_web_server
@@ -12,10 +13,14 @@ from . import dump_songs, restore_songs
 def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
-    if not argv or argv[0] in ("-h", "--help"):
+    if not argv or argv == ["tui"]:
+        from .tui import run_tui
+        run_tui()
+        return
+    if argv[0] in ("-h", "--help"):
         print("Elektron Digi Song Mode Manager (dsm)", file=sys.stderr)
-        print("Usage: dsm <project> [tui|info|rows|restore|web] ... | dsm launch | dsm stop", file=sys.stderr)
-        raise SystemExit(0 if argv and argv[0] in ("-h", "--help") else 2)
+        print("Usage: dsm [tui] | dsm <project> [tui|info|rows|restore|web] ... | dsm launch | dsm stop", file=sys.stderr)
+        raise SystemExit(0)
 
     if argv[0] == "launch":
         from .launcher import launch
@@ -63,7 +68,7 @@ def main(argv: list[str] | None = None) -> None:
         if len(argv) > 2:
             slots = [slots[int(argv[2])]]
         for i, rec in enumerate(slots):
-            info = get_song_info(rec, pattern_names)
+            info = get_song_info(rec, pattern_names, device=device_name(raw, prj.suffix))
             print(f"Song {i:02d} {info['name']} rows={len(info['rows'])}")
             for j, r in enumerate(info["rows"]):
                 print(f"  {j:02d}: pat={r['pattern_name']} tag={r['label_idx']} rep={r['repeat']} bpm={r['bpm_raw']} len={r['length']} mute={r['mute']:04X}")

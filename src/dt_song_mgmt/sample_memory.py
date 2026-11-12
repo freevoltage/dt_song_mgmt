@@ -4,20 +4,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .constants import KIT_BASE, KIT_STRIDE_DT2, PATTERN_BASE, PATTERN_STRIDE, device_name
+from .constants import device_name
+from .dt2_samples import pattern_sample_hashes
 
-DT2_TRACKS = 16
-DT2_SOUND_BASE = 0x3C
-DT2_SOUND_STRIDE = 1109
-# The sound preset stores the manifest sample hash at this offset.
-DT2_SAMPLE_HASH_OFFSET = 301
 DT2_SAMPLE_POOL_OFFSET = 0xDC871F
 DT2_SAMPLE_POOL_ROW_SIZE = 16
 DT2_SAMPLE_POOL_ROWS = 1024
-DT2_PATTERN_SAMPLE_LOCKS_OFFSET = 0x10A04
-DT2_SAMPLE_LOCK_PARAM_ID = 0x24
-DT2_SAMPLE_LOCK_RECORD_SIZE = 258
-DT2_SAMPLE_LOCK_RECORDS = 80
+DT2_SAMPLE_RAM_LIMIT_BYTES = 400_000_000
+DT2_SAMPLE_SLOT_LIMIT = 1016
 
 
 def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
@@ -38,11 +32,12 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
         try:
             sample_hash = int(item["Hash"])
             size = int(item["FileSize"])
-            name = str(item["FileName"]).rsplit("/", 1)[-1]
+            path = str(item["FileName"])
+            name = path.rsplit("/", 1)[-1]
         except (KeyError, TypeError, ValueError):
             continue
         if sample_hash >= 0 and size >= 0:
-            samples[sample_hash] = {"hash": sample_hash, "name": name, "size": size}
+            samples[sample_hash] = {"hash": sample_hash, "name": name, "path": path, "size": size, "size_known": True}
 
     pool: list[dict | None] = []
     for row in range(DT2_SAMPLE_POOL_ROWS):
@@ -60,44 +55,31 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
         samples[sample_hash] = {
             "hash": sample_hash,
             "name": manifest_entry.get("name", f"POOL {row + 1:03} · {sample_hash:08X}"),
+            "path": manifest_entry.get("path"),
             "size": manifest_entry.get("size", size),
+            "size_known": True,
         }
 
     pattern_samples: dict[int, set[int]] = defaultdict(set)
     pattern_tracks: dict[int, dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
     pattern_locked: dict[int, set[int]] = defaultdict(set)
+    pattern_errors: dict[int, str] = {}
     for pattern_index in range(128):
-        kit = KIT_BASE + pattern_index * KIT_STRIDE_DT2
-        for track in range(DT2_TRACKS):
-            offset = kit + DT2_SOUND_BASE + track * DT2_SOUND_STRIDE + DT2_SAMPLE_HASH_OFFSET
-            sample_hash = int.from_bytes(raw[offset:offset + 4], "big")
-            if sample_hash in samples:
-                pattern_samples[pattern_index].add(sample_hash)
-                pattern_tracks[pattern_index][sample_hash].append(track)
-
-        # DT2 sample-select parameter locks store 1-based pool slot values in
-        # big-endian u16 step fields. Slot zero means no sample selection.
-        lock_base = PATTERN_BASE + pattern_index * PATTERN_STRIDE + DT2_PATTERN_SAMPLE_LOCKS_OFFSET
-        for record_index in range(DT2_SAMPLE_LOCK_RECORDS):
-            record = lock_base + record_index * DT2_SAMPLE_LOCK_RECORD_SIZE
-            if record + DT2_SAMPLE_LOCK_RECORD_SIZE > len(raw):
-                break
-            if raw[record] != DT2_SAMPLE_LOCK_PARAM_ID:
-                continue
-            track = raw[record + 1]
-            if track >= DT2_TRACKS:
-                continue
-            for step in range(128):
-                slot = int.from_bytes(raw[record + 2 + step * 2:record + 4 + step * 2], "big")
-                if slot == 0 or slot > len(pool):
-                    continue
-                sample = pool[slot - 1]
-                if sample is None:
-                    continue
-                sample_hash = sample["hash"]
-                pattern_samples[pattern_index].add(sample_hash)
+        try:
+            details = pattern_sample_hashes(raw, pattern_index)
+        except ValueError as exc:
+            pattern_errors[pattern_index] = str(exc)
+            continue
+        for sample_hash, detail in details.items():
+            if sample_hash not in samples:
+                samples[sample_hash] = {
+                    "hash": sample_hash, "name": f"REFERENCE · {sample_hash:08X}",
+                    "path": None, "size": 0, "size_known": False,
+                }
+            pattern_samples[pattern_index].add(sample_hash)
+            pattern_tracks[pattern_index][sample_hash].extend(detail["default_tracks"] | detail["locked_tracks"])
+            if detail["locked_tracks"]:
                 pattern_locked[pattern_index].add(sample_hash)
-                pattern_tracks[pattern_index][sample_hash].append(track)
 
     used_by: dict[int, set[int]] = defaultdict(set)
     for pattern_index, hashes in pattern_samples.items():
@@ -110,6 +92,7 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
         exclusive = {sample_hash for sample_hash in hashes if len(used_by[sample_hash]) == 1}
         patterns.append({
             "index": index,
+            "error": pattern_errors.get(index),
             "samples": [
                 {
                     **samples[sample_hash],
@@ -136,9 +119,22 @@ def analyze_sample_memory(raw: bytes, manifest: dict) -> dict:
         "unreferenced_sample_bytes": sum(samples[sample_hash]["size"] for sample_hash in set(samples) - set(used_by)),
         "shared_sample_count": sum(len(patterns_for_sample) > 1 for patterns_for_sample in used_by.values()),
         "sample_pool_count": sum(entry is not None for entry in pool),
+        "sample_pool_bytes": sum(entry["size"] for entry in pool if entry is not None),
+        "pattern_error_count": len(pattern_errors),
     }
 
 
 def format_bytes(size: int) -> str:
     """Format byte values in MiB for a readable TUI table."""
     return f"{size / (1024 * 1024):.2f} MiB"
+
+
+def format_project_ram(analysis: dict) -> str:
+    """Summarize pool-row sizes using decimal MB; device accounting is unverified."""
+    used = analysis["sample_pool_bytes"]
+    remaining = max(0, DT2_SAMPLE_RAM_LIMIT_BYTES - used)
+    return (
+        f"Estimated pool RAM: {used / 1_000_000:.1f} / 400 MB · "
+        f"~{remaining / 1_000_000:.1f} MB free · "
+        f"slots {analysis['sample_pool_count']} / {DT2_SAMPLE_SLOT_LIMIT:,}"
+    )

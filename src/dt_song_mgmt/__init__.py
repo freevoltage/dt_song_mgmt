@@ -80,7 +80,7 @@ def dump_songs(prj: Path) -> Path:
         path.write_bytes(rec)
         print(f"dump  {path.name:40s}  {len(rec):5d} bytes  {name}")
     html_path = outdir / "songs.html"
-    html_path.write_text(render_songs_html(prj.stem, slots, collect_pattern_names(raw)), encoding="utf-8")
+    html_path.write_text(render_songs_html(prj.stem, slots, collect_pattern_names(raw), device=device_name(raw, prj.suffix)), encoding="utf-8")
     print(f"wrote {SONG_SLOTS} slots ({used} named) to {outdir}")
     print(f"wrote {html_path}")
     print(f"uncompressed project {len(raw)} bytes; each slot is {SONG_SIZE} bytes")

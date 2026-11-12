@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 
+from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Label, Static
+from textual.widgets import Button, Input, Label, Static
 
 from .patterns import get_all_patterns_info
+from .pattern_steps import pattern_trigs
 from .songs import pattern_label
 
 
@@ -58,24 +60,114 @@ class PatternEntryModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class PatternConfirmModal(ModalScreen[bool]):
+    """Confirm clearing a pattern and its corresponding sound kit."""
+
+    CSS = """
+    PatternConfirmModal { align: center middle; background: #000000 70%; }
+    #pattern-confirm-dialog { width: 76; height: auto; padding: 1 2; border: solid #c18a3c; background: #111111; }
+    #pattern-confirm-buttons { height: 3; align-horizontal: right; }
+    #pattern-confirm-buttons Button { margin-left: 1; border: none; background: #222222; color: #dedbd2; }
+    """
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, message: str):
+        super().__init__()
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="pattern-confirm-dialog"):
+            yield Label("Clear pattern?")
+            yield Static(self.message)
+            with Horizontal(id="pattern-confirm-buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Clear pattern and kit", id="confirm", variant="error")
+
+    def on_mount(self) -> None:
+        self.query_one("#cancel", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class PatternList(Static):
+    """Focusable, text-rendered pattern list with no table widget chrome."""
+
+    can_focus = True
+    BINDINGS = [
+        ("up", "move(-1)", "Previous pattern"),
+        ("down", "move(1)", "Next pattern"),
+        ("pageup", "move(-12)", "Page up"),
+        ("pagedown", "move(12)", "Page down"),
+        ("home", "first", "First pattern"),
+        ("end", "last", "Last pattern"),
+        ("left", "preview_page(-1)", "Previous step page"),
+        ("right", "preview_page(1)", "Next step page"),
+        ("ctrl+up", "preview_scroll(-3)", "Scroll preview up"),
+        ("ctrl+down", "preview_scroll(3)", "Scroll preview down"),
+    ]
+
+    def action_move(self, delta: int) -> None:
+        self.screen._move_selection(delta)
+
+    def action_first(self) -> None:
+        self.screen.action_select_first_pattern()
+
+    def action_last(self) -> None:
+        self.screen.action_select_last_pattern()
+
+    def action_preview_page(self, delta: int) -> None:
+        self.screen.change_preview_page(delta)
+
+    def action_preview_scroll(self, delta: int) -> None:
+        if self.screen.preview_visible:
+            self.screen.query_one("#pattern-preview", VerticalScroll).scroll_relative(y=delta, animate=False)
+
+
+class SequencerGrid(Static):
+    """Redraw step spacing when the available preview width changes."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_width = -1
+
+    def on_resize(self, event) -> None:
+        if event.size.width != self._last_width:
+            self._last_width = event.size.width
+            if self.screen.preview_visible:
+                self.screen._refresh_preview(self.screen.session.working_raw())
+
+
 class PatternManagerScreen(ModalScreen[None]):
     """Search and stage operations on the 128 pattern slots."""
 
     CSS = """
-    PatternManagerScreen { align: left top; background: #101010; color: #dedbd2; }
-    #pattern-workspace { width: 100%; height: 100%; padding: 0 2; }
-    #pattern-topline { height: 2; padding-top: 1; }
-    #pattern-heading { width: 1fr; color: #e4e0d6; text-style: bold; }
-    #pattern-project { width: auto; color: #a49f93; }
-    #pattern-banks { height: 2; color: #a49f93; padding-top: 1; border-bottom: solid #37342e; }
-    #pattern-search { height: 3; margin: 1 0; border: none; border-bottom: solid #37342e; background: #101010; }
-    #pattern-search:focus { border-bottom: solid #d6a04b; }
-    #pattern-table { height: 1fr; background: #101010; border: none; }
-    #pattern-table > .datatable--header { background: #191919; color: #a49f93; }
-    #pattern-table > .datatable--cursor { background: #25221c; color: #f1c36d; text-style: bold; }
-    #pattern-table:focus > .datatable--cursor { background: #d6a04b; color: #15120d; }
-    #pattern-selection { height: 2; padding: 0 1; color: #f1c36d; border-top: solid #37342e; }
-    #pattern-help { height: 2; color: #8d887d; padding: 0 1; }
+    PatternManagerScreen { align: left top; background: $background; color: $text; }
+    #pattern-workspace { width: 100%; height: 100%; padding: 0 1; }
+    #pattern-topline { height: 2; }
+    #pattern-heading { width: 1fr; text-style: bold; }
+    #pattern-project { width: auto; }
+    #pattern-content { height: 1fr; }
+    #pattern-bank-pane { width: 14; padding-right: 1; }
+    #pattern-bank-title { height: 1; text-style: bold; }
+    #pattern-banks { height: auto; }
+    #pattern-results { width: 1fr; padding-left: 1; }
+    #pattern-preview { display: none; width: 1fr; min-width: 25; border-left: solid $panel; padding: 0 1; }
+    #pattern-preview-grid { height: auto; }
+    PatternManagerScreen.preview-visible #pattern-preview { display: block; }
+    PatternManagerScreen.preview-visible #pattern-results { width: 32; }
+    PatternManagerScreen.preview-visible.compact #pattern-bank-pane { display: none; }
+    PatternManagerScreen.preview-visible.compact #pattern-results { width: 20; }
+    #pattern-count { height: 1; }
+    #pattern-search { height: 3; margin: 1 0; }
+    #pattern-columns { height: 1; }
+    #pattern-scroll { height: 1fr; }
+    #pattern-list { height: auto; min-height: 1; }
+    #pattern-selection { height: 5; }
+    #pattern-help { height: 2; }
     """
 
     BINDINGS = [
@@ -90,6 +182,12 @@ class PatternManagerScreen(ModalScreen[None]):
         ("7", "filter_bank_g", "Bank G"),
         ("8", "filter_bank_h", "Bank H"),
         ("0", "filter_all_banks", "All banks"),
+        ("up", "select_previous_pattern", "Previous pattern"),
+        ("down", "select_next_pattern", "Next pattern"),
+        ("pageup", "page_up_patterns", "Page up"),
+        ("pagedown", "page_down_patterns", "Page down"),
+        ("home", "select_first_pattern", "First pattern"),
+        ("end", "select_last_pattern", "Last pattern"),
         ("y", "yank_pattern", "Yank pattern"),
         ("x", "cut_pattern_to_clipboard", "Cut pattern"),
         ("p", "paste_pattern", "Paste pattern"),
@@ -98,6 +196,7 @@ class PatternManagerScreen(ModalScreen[None]):
         ("d", "clear_pattern", "Clear"),
         ("r", "rename_pattern", "Rename"),
         ("i", "import_pattern", "Import"),
+        ("v", "toggle_preview", "Sequencer"),
     ]
 
     def __init__(self, session, sessions=None, bank_filter: int | None = None, clipboard_owner=None):
@@ -108,49 +207,54 @@ class PatternManagerScreen(ModalScreen[None]):
         self.selected_pattern = 0
         self.filter_text = ""
         self.bank_filter = bank_filter
-        self._all_patterns: list[dict] = []
         self._visible_patterns: list[dict] = []
+        self.preview_visible = False
+        self.preview_page = 0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="pattern-workspace"):
             with Horizontal(id="pattern-topline"):
                 yield Static("PATTERNS", id="pattern-heading")
                 yield Static("", id="pattern-project")
-            yield Static("", id="pattern-banks")
-            yield Input(placeholder="Filter by bank, slot, or pattern name…", id="pattern-search")
-            yield DataTable(id="pattern-table", cursor_type="row", zebra_stripes=True)
+            with Horizontal(id="pattern-content"):
+                with Vertical(id="pattern-bank-pane"):
+                    yield Static("BANK", id="pattern-bank-title")
+                    yield Static("", id="pattern-banks")
+                with Vertical(id="pattern-results"):
+                    yield Static("", id="pattern-count")
+                    yield Input(placeholder="/ to filter slots or names", id="pattern-search")
+                    yield Static("    SLOT  SONG   PATTERN NAME", id="pattern-columns")
+                    with VerticalScroll(id="pattern-scroll"):
+                        yield PatternList("", id="pattern-list")
+                with VerticalScroll(id="pattern-preview"):
+                    yield SequencerGrid("", id="pattern-preview-grid")
             yield Static("", id="pattern-selection")
             yield Static(
-                "↑/↓ select · PgUp/PgDn scroll · 1–8 banks · 0 all · / search\n"
-                "c copy · m move · d clear · r rename · i import · y copy · x cut · p paste",
+                "↑/↓ browse · 1–8 banks · 0 all · / filter · v sequencer · ←/→ steps\n"
+                "c copy · m move · d clear · r rename · i import · y copy · x cut · p paste · Esc back",
                 id="pattern-help",
             )
-        yield Footer()
 
     def on_mount(self) -> None:
-        table = self.query_one("#pattern-table", DataTable)
-        table.add_columns("Slot", "Pattern name", "Song rows")
-        self._refresh_table()
-        table.focus()
+        pattern_list = self.query_one("#pattern-list", PatternList)
+        self._refresh_view()
+        pattern_list.focus()
+
+    def on_resize(self, event) -> None:
+        self.set_class(event.size.width < 76, "compact")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "pattern-search":
             self.filter_text = event.value.strip().casefold()
-            self._refresh_table()
+            self._refresh_view()
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.data_table.id != "pattern-table" or event.row_key is None:
-            return
-        try:
-            self.selected_pattern = int(event.row_key.value)
-        except (TypeError, ValueError):
-            pass
-        self._refresh_selection()
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "pattern-search":
+            self.query_one("#pattern-list", PatternList).focus()
 
-    def _refresh_table(self) -> None:
-        table = self.query_one("#pattern-table", DataTable)
-        all_patterns = get_all_patterns_info(self.session.working_raw())
-        self._all_patterns = all_patterns
+    def _refresh_view(self) -> None:
+        raw = self.session.working_raw()
+        all_patterns = get_all_patterns_info(raw)
         patterns = all_patterns
         if self.bank_filter is not None:
             patterns = [pattern for pattern in patterns if pattern["index"] // 16 == self.bank_filter]
@@ -161,43 +265,95 @@ class PatternManagerScreen(ModalScreen[None]):
                 or self.filter_text in pattern["name"].casefold()
             ]
         self._visible_patterns = patterns
-        named_count = sum(bool(pattern["name"].strip()) for pattern in all_patterns)
         bank_label = "ALL BANKS" if self.bank_filter is None else f"BANK {chr(ord('A') + self.bank_filter)}"
-        heading = f"PATTERN MANAGER    {bank_label} · {len(patterns)} slots · {named_count}/128 named"
         clipboard = self._clipboard()
+        draft_status = f"DRAFT {len(self.session.operations)}" if self.session.operations else "CLEAN"
+        project_name = self.session.display_name if self.session.is_new_project else self.session.path.name
+        project_line = f"{self.session.device} / {project_name}"
         if clipboard:
             action = "CUT" if clipboard["mode"] == "cut" else "COPY"
-            heading += f"    CLIPBOARD {action} {pattern_label(clipboard['slot'])}"
-        self.query_one("#pattern-heading", Static).update(heading)
-        draft_status = f"DRAFT · {len(self.session.operations)} edits" if self.session.operations else "CLEAN"
-        self.query_one("#pattern-project", Static).update(
-            f"{self.session.device}  /  {self.session.path.name}  ·  {draft_status}"
-        )
-        bank_items = []
+            project_line += f" · {action} {pattern_label(clipboard['slot'])} ready"
+        self.query_one("#pattern-heading", Static).update("PATTERNS")
+        self.query_one("#pattern-project", Static).update(f"{project_line}  ·  {draft_status}")
+        bank_text = Text()
+        bank_text.append("\n")
         for bank in range(8):
             name = chr(ord("A") + bank)
-            bank_items.append(
-                f"[{name} {bank + 1}]" if self.bank_filter == bank else f" {name} {bank + 1} "
-            )
-        all_marker = "[ALL 0]" if self.bank_filter is None else " ALL 0 "
-        self.query_one("#pattern-banks", Static).update(
-            f"BANKS   {'  '.join(bank_items)}     {all_marker}"
+            marker = ">" if self.bank_filter == bank else " "
+            bank_text.append(f"{marker} {name}    {bank + 1}\n", style="reverse bold" if marker == ">" else None)
+        all_marker = ">" if self.bank_filter is None else " "
+        bank_text.append(f"{all_marker} ALL    0", style="reverse bold" if all_marker == ">" else None)
+        self.query_one("#pattern-banks", Static).update(bank_text)
+        named_count = sum(bool(pattern["name"].strip()) for pattern in all_patterns)
+        self.query_one("#pattern-count", Static).update(
+            f"{bank_label}  ·  {len(patterns)} slots  ·  {named_count}/128 named"
         )
-        table.clear(columns=False)
+        visible_indices = [pattern["index"] for pattern in patterns]
+        if visible_indices and self.selected_pattern not in visible_indices:
+            self.selected_pattern = visible_indices[0]
+        selected_row = visible_indices.index(self.selected_pattern) if visible_indices else 0
+        content = Text()
         for pattern in patterns:
             name = pattern["name"].strip() or "(unnamed)"
-            table.add_row(
-                pattern["label"],
-                name,
-                str(pattern["ref_count"]),
-                key=str(pattern["index"]),
-            )
+            marker = ">" if pattern["index"] == self.selected_pattern else " "
+            usage = f"{pattern['ref_count']}r" if pattern["ref_count"] else "–"
+            line = f"{marker} {pattern['label']:<4}  {usage:<5}  {name}"
+            content.append(line, style="reverse bold" if marker == ">" else None)
+            content.append("\n")
+        if not patterns:
+            content.append("No slots match this filter. Press / and clear the search.")
+        self.query_one("#pattern-list", PatternList).update(content)
         if patterns:
-            visible_indices = [pattern["index"] for pattern in patterns]
-            if self.selected_pattern not in visible_indices:
-                self.selected_pattern = visible_indices[0]
-            table.move_cursor(row=visible_indices.index(self.selected_pattern), column=0)
+            self.query_one("#pattern-scroll", VerticalScroll).scroll_to(
+                y=selected_row, animate=False, force=True
+            )
         self._refresh_selection()
+        if self.preview_visible:
+            self._refresh_preview(raw)
+
+    def action_toggle_preview(self) -> None:
+        self.preview_visible = not self.preview_visible
+        self.set_class(self.preview_visible, "preview-visible")
+        self._refresh_view()
+
+    def change_preview_page(self, delta: int) -> None:
+        if not self.preview_visible:
+            return
+        self.preview_page = max(0, min(7, self.preview_page + delta))
+        self._refresh_preview(self.session.working_raw())
+
+    def _refresh_preview(self, raw: bytes) -> None:
+        output = Text()
+        if not self._visible_patterns:
+            output.append("No pattern selected.")
+        else:
+            try:
+                tracks = pattern_trigs(raw, self.selected_pattern, self.session.device)
+            except ValueError as exc:
+                output.append(f"Cannot read trigs: {exc}")
+            else:
+                start = self.preview_page * 16
+                width = self.query_one("#pattern-preview-grid", SequencerGrid).size.width
+                cell_width = max(1, (width - 8) // 16)
+                output.append(f"{pattern_label(self.selected_pattern)}  PAGE {self.preview_page + 1}\n", style="bold")
+                if cell_width >= 3:
+                    header = " ".join(
+                        "".join(str(step + 1).center(cell_width) for step in range(group, group + 4))
+                        for group in (0, 4, 8, 12)
+                    )
+                else:
+                    header = " ".join(str(group + 1).ljust(cell_width * 4) for group in (0, 4, 8, 12)).rstrip()
+                output.append("     " + header + "\n", style="dim")
+                for index, steps in enumerate(tracks):
+                    output.append(f"T{index + 1:02}  ")
+                    for step in range(16):
+                        active = steps[start + step]
+                        output.append(("●" if active else "·").center(cell_width), style="bold" if active else "dim")
+                        if step % 4 == 3 and step != 15:
+                            output.append(" ")
+                    output.append("\n")
+                output.append("\n←/→ page · Ctrl+↑/↓ scroll\nSong-row mutes not shown", style="dim")
+        self.query_one("#pattern-preview-grid", Static).update(output)
 
     def _refresh_selection(self) -> None:
         if not self.is_mounted:
@@ -211,16 +367,71 @@ class PatternManagerScreen(ModalScreen[None]):
         else:
             name = pattern["name"].strip() or "(unnamed)"
             refs = pattern["ref_count"]
-            row_text = "song rows reference it" if refs != 1 else "song row references it"
-            detail = f"{pattern['label']}   {name}   ·   {refs} {row_text}"
+            usage = f"USED by {refs} song row(s)" if refs else "UNUSED by songs"
+            detail = f"{pattern['label']}   {name}   ·   {usage}\n{self._reference_summary(pattern)}"
         self.query_one("#pattern-selection", Static).update(detail)
+
+    def _pattern_info(self, slot: int, session=None) -> dict:
+        session = session or self.session
+        return get_all_patterns_info(session.working_raw())[slot]
+
+    @staticmethod
+    def _reference_summary(pattern: dict, max_songs: int = 3) -> str:
+        grouped: dict[tuple[int, str], list[int]] = {}
+        for reference in pattern.get("references", []):
+            key = (reference["song_slot"], reference["song_name"])
+            grouped.setdefault(key, []).append(reference["row"])
+        if not grouped:
+            return "No song rows reference this pattern."
+        parts = []
+        entries = list(grouped.items())
+        for (slot, name), rows in entries[:max_songs]:
+            song_name = "(unnamed)" if name == "EMPTY" else name
+            row_list = ", ".join(f"{row:02d}" for row in rows[:3])
+            if len(rows) > 3:
+                row_list += f" +{len(rows) - 3} rows"
+            prefix = "Used by: " if not parts else "         "
+            parts.append(f"{prefix}Song {slot + 1:02d} {song_name} · rows {row_list}")
+        if len(entries) > max_songs:
+            parts.append(f"         +{len(entries) - max_songs} more songs")
+        return "\n".join(parts)
 
     def action_focus_filter(self) -> None:
         self.query_one("#pattern-search", Input).focus()
 
+    def _move_selection(self, delta: int) -> None:
+        if not self._visible_patterns:
+            return
+        indices = [pattern["index"] for pattern in self._visible_patterns]
+        current = indices.index(self.selected_pattern) if self.selected_pattern in indices else 0
+        self.selected_pattern = indices[max(0, min(len(indices) - 1, current + delta))]
+        self._refresh_view()
+
+    def action_select_previous_pattern(self) -> None:
+        self._move_selection(-1)
+
+    def action_select_next_pattern(self) -> None:
+        self._move_selection(1)
+
+    def action_page_up_patterns(self) -> None:
+        self._move_selection(-12)
+
+    def action_page_down_patterns(self) -> None:
+        self._move_selection(12)
+
+    def action_select_first_pattern(self) -> None:
+        if self._visible_patterns:
+            self.selected_pattern = self._visible_patterns[0]["index"]
+            self._refresh_view()
+
+    def action_select_last_pattern(self) -> None:
+        if self._visible_patterns:
+            self.selected_pattern = self._visible_patterns[-1]["index"]
+            self._refresh_view()
+
     def _select_bank(self, bank: int | None) -> None:
         self.bank_filter = bank
-        self._refresh_table()
+        self._refresh_view()
 
     def action_filter_bank_a(self) -> None:
         self._select_bank(0)
@@ -252,7 +463,7 @@ class PatternManagerScreen(ModalScreen[None]):
     def _stage(self, operation: dict, message: str) -> None:
         try:
             self.session.stage(operation)
-            self._refresh_table()
+            self._refresh_view()
             self.app.notify(message)
         except Exception as exc:
             self.app.notify(str(exc), severity="error", timeout=8)
@@ -266,26 +477,32 @@ class PatternManagerScreen(ModalScreen[None]):
             self.clipboard_owner._dsm_clipboard = value
 
     def action_yank_pattern(self) -> None:
+        info = self._pattern_info(self.selected_pattern)
         self._set_clipboard({
             "kind": "pattern",
             "session": self.session,
             "slot": self.selected_pattern,
             "mode": "copy",
         })
-        self._refresh_table()
-        self.app.notify(f"Copied {pattern_label(self.selected_pattern)} to the pattern clipboard")
+        self._refresh_view()
+        message = f"Copied {pattern_label(self.selected_pattern)} to the pattern clipboard"
+        if info["ref_count"]:
+            message += f" · {self._reference_summary(info)}"
+        self.app.notify(message, timeout=8)
 
     def action_cut_pattern_to_clipboard(self) -> None:
+        info = self._pattern_info(self.selected_pattern)
         self._set_clipboard({
             "kind": "pattern",
             "session": self.session,
             "slot": self.selected_pattern,
             "mode": "cut",
         })
-        self._refresh_table()
-        self.app.notify(
-            f"Marked {pattern_label(self.selected_pattern)} to move; choose a destination and press p"
-        )
+        self._refresh_view()
+        message = f"Marked {pattern_label(self.selected_pattern)} to move; choose a destination and press p"
+        if info["ref_count"]:
+            message += f" · {self._reference_summary(info)}; same-project moves retarget these rows"
+        self.app.notify(message, timeout=8)
 
     def action_paste_pattern(self) -> None:
         clipboard = self._clipboard()
@@ -296,13 +513,25 @@ class PatternManagerScreen(ModalScreen[None]):
         source = clipboard["slot"]
         destination = self.selected_pattern
         is_cut = clipboard["mode"] == "cut"
+        source_info = self._pattern_info(source, source_session)
+        destination_info = self._pattern_info(destination)
         if source_session is self.session and source == destination:
             self.app.notify("Choose a different destination pattern", severity="warning")
             return
+        if is_cut and source_session is not self.session and source_info["ref_count"]:
+            self.app.notify(
+                f"Cannot move {pattern_label(source)} across projects while songs reference it. "
+                f"{self._reference_summary(source_info)}",
+                severity="error",
+                timeout=10,
+            )
+            return
         try:
             if source_session is self.session:
-                operation_type = "pattern_move" if is_cut else "pattern_copy"
-                self.session.stage({"type": operation_type, "src_idx": source, "dst_idx": destination})
+                if is_cut:
+                    self.session.stage_pattern_move(source, destination)
+                else:
+                    self.session.stage({"type": "pattern_copy", "src_idx": source, "dst_idx": destination})
             else:
                 source_raw = source_session.working_raw()
                 source_members = source_session.working_members()
@@ -333,14 +562,23 @@ class PatternManagerScreen(ModalScreen[None]):
             self._set_clipboard(None)
             if source_session is not self.session and self.clipboard_owner is not None:
                 self.clipboard_owner._refresh_tab_labels()
-        self._refresh_table()
+        self._refresh_view()
         verb = "Moved" if is_cut else "Pasted"
         message = f"{verb} {pattern_label(source)} to {pattern_label(destination)} in the draft"
         if is_cut and source_session is not self.session:
-            message += "; both projects are staged, press s in each project to save"
-        else:
-            message += "; press s to save"
-        self.app.notify(message)
+            message += "; both projects are staged"
+        context = []
+        if is_cut and source_info["ref_count"]:
+            context.append(f"song rows retargeted from {pattern_label(source)}: {self._reference_summary(source_info)}")
+        elif source_info["ref_count"]:
+            context.append(f"source remains used: {self._reference_summary(source_info)}")
+        if destination_info["ref_count"]:
+            context.append(f"destination users now play the pasted pattern: {self._reference_summary(destination_info)}")
+        if source_session is not self.session and self.session.device == "DT2":
+            context.append("Available WAVs staged; factory sounds may use device references")
+        if context:
+            message += " · " + " · ".join(context)
+        self.app.notify(message, timeout=10)
 
     def _prompt_slot(self, title: str, callback) -> None:
         self.app.push_screen(
@@ -373,12 +611,19 @@ class PatternManagerScreen(ModalScreen[None]):
             self.app.notify("Source and destination are the same slot", severity="warning")
             return
         source = self.selected_pattern
+        source_info = self._pattern_info(source)
+        destination_info = self._pattern_info(destination)
+        message = f"Copied {pattern_label(source)} to {pattern_label(destination)} in the draft"
+        if source_info["ref_count"]:
+            message += f" · source remains used: {self._reference_summary(source_info)}"
+        if destination_info["ref_count"]:
+            message += f" · destination users now play the copied pattern: {self._reference_summary(destination_info)}"
         self._stage(
             {"type": "pattern_copy", "src_idx": source, "dst_idx": destination},
-            f"Copied {pattern_label(source)} to {pattern_label(destination)} in the draft; press s to save",
+            message,
         )
         self.selected_pattern = destination
-        self._refresh_table()
+        self._refresh_view()
 
     def _on_move_destination(self, value: str | None) -> None:
         if value is None:
@@ -392,12 +637,27 @@ class PatternManagerScreen(ModalScreen[None]):
             self.app.notify("Source and destination are the same slot", severity="warning")
             return
         source = self.selected_pattern
-        self._stage(
-            {"type": "pattern_move", "src_idx": source, "dst_idx": destination},
-            f"Moved {pattern_label(source)} to {pattern_label(destination)} in the draft; press s to save",
-        )
+        source_info = self._pattern_info(source)
+        destination_info = self._pattern_info(destination)
+        message = f"Moved {pattern_label(source)} to {pattern_label(destination)} in the draft"
+        if source_info["ref_count"]:
+            message += f" · song rows retargeted: {self._reference_summary(source_info)}"
+        if destination_info["ref_count"]:
+            message += f" · existing destination users now play the moved pattern: {self._reference_summary(destination_info)}"
+        if not self._stage_move(source, destination, message):
+            return
         self.selected_pattern = destination
-        self._refresh_table()
+        self._refresh_view()
+
+    def _stage_move(self, source: int, destination: int, message: str) -> bool:
+        try:
+            self.session.stage_pattern_move(source, destination)
+            self._refresh_view()
+            self.app.notify(message, timeout=10)
+            return True
+        except Exception as exc:
+            self.app.notify(f"Could not move pattern: {exc}", severity="error", timeout=10)
+            return False
 
     def action_copy_pattern(self) -> None:
         self._prompt_slot("Copy pattern", self._on_copy_destination)
@@ -407,10 +667,26 @@ class PatternManagerScreen(ModalScreen[None]):
 
     def action_clear_pattern(self) -> None:
         slot = self.selected_pattern
-        self._stage(
-            {"type": "pattern_clear", "pat_idx": slot},
-            f"Cleared {pattern_label(slot)} in the draft; press s to save",
+        info = self._pattern_info(slot)
+        if info["ref_count"]:
+            message = (
+                f"{self._reference_summary(info)}. Clearing this pattern and its sound kit leaves those "
+                "song rows pointing at an empty pattern slot."
+            )
+        else:
+            message = "No song rows use this pattern. This clears its pattern data and associated sound kit."
+        self.app.push_screen(
+            PatternConfirmModal(message),
+            lambda confirmed: self._on_clear_confirmation(confirmed, slot, info),
         )
+
+    def _on_clear_confirmation(self, confirmed: bool, slot: int, info: dict) -> None:
+        if not confirmed:
+            return
+        message = f"Cleared {pattern_label(slot)} and its sound kit in the draft"
+        if info["ref_count"]:
+            message += f" · rows still reference the now-empty slot: {self._reference_summary(info)}"
+        self._stage({"type": "pattern_clear", "pat_idx": slot}, message)
 
     def action_rename_pattern(self) -> None:
         slot = self.selected_pattern
@@ -433,13 +709,13 @@ class PatternManagerScreen(ModalScreen[None]):
             return
         self._stage(
             {"type": "pattern_rename", "pat_idx": self.selected_pattern, "name": name},
-            f"Renamed {pattern_label(self.selected_pattern)} in the draft; press s to save",
+            f"Renamed {pattern_label(self.selected_pattern)} in the draft",
         )
 
     def action_import_pattern(self) -> None:
         source_sessions = [item for item in self.sessions if item.path != self.session.path]
         sources = "\n".join(
-            f"{index + 1}: {item.path.name} ({item.device}, "
+            f"{index + 1}: {item.display_name if item.is_new_project else item.path.name} ({item.device}, "
             f"{'DRAFT ' + str(len(item.operations)) if item.operations else 'CLEAN'})"
             for index, item in enumerate(source_sessions)
         )
@@ -482,15 +758,22 @@ class PatternManagerScreen(ModalScreen[None]):
         destination = self.selected_pattern
         try:
             source_raw = source_session.working_raw() if source_session is not None else None
+            destination_info = self._pattern_info(destination)
+            source_info = self._pattern_info(source_slot, source_session) if source_session else None
             self.session.stage_pattern_import(
                 source_path,
                 [{"src_idx": source_slot, "dst_idx": destination}],
                 source_raw=source_raw,
             )
-            self._refresh_table()
-            self.app.notify(
-                f"Imported {pattern_label(source_slot)} to {pattern_label(destination)} in the draft; press s to save"
-            )
+            self._refresh_view()
+            message = f"Imported {pattern_label(source_slot)} to {pattern_label(destination)} in the draft"
+            if source_info and source_info["ref_count"]:
+                message += f" · source remains used: {self._reference_summary(source_info)}"
+            if destination_info["ref_count"]:
+                message += f" · destination users now play the imported pattern: {self._reference_summary(destination_info)}"
+            if self.session.device == "DT2":
+                message += " · Available WAVs staged; factory sounds may use device references"
+            self.app.notify(message, timeout=10)
         except Exception as exc:
             self.app.notify(str(exc), severity="error", timeout=10)
 

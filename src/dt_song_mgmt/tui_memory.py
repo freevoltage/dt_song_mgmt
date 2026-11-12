@@ -7,7 +7,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Static
 
-from .sample_memory import analyze_sample_memory, format_bytes
+from .sample_memory import analyze_sample_memory, format_bytes, format_project_ram
 from .songs import pattern_label
 
 
@@ -33,14 +33,22 @@ class SampleMemoryScreen(ModalScreen[None]):
         super().__init__()
         self.session = session
         self.selected_pattern = 0
-        self.analysis = analyze_sample_memory(session.working_raw(), session.working_manifest())
+        manifest = session.working_manifest()
+        self.analysis = analyze_sample_memory(session.working_raw(), manifest)
+        members = {info.filename for info, _data in session.working_members()}
+        self.archived_hashes = {
+            int(item["Hash"]) for item in manifest.get("Samples", [])
+            if isinstance(item, dict) and str(item.get("Hash", "")).isdigit()
+            and item.get("FileName") in members
+        }
 
     def compose(self) -> ComposeResult:
         total = self.analysis["project_sample_bytes"]
         referenced = self.analysis["referenced_sample_bytes"]
         with Vertical(id="memory-window"):
             yield Static(
-                f"DIGITAKT II SAMPLE MEMORY · {format_bytes(total)} across "
+                f"{format_project_ram(self.analysis)}\n"
+                f"{format_bytes(total)} across "
                 f"{self.analysis['project_sample_count']} project samples · "
                 f"{format_bytes(referenced)} referenced by patterns",
                 id="memory-heading",
@@ -50,7 +58,8 @@ class SampleMemoryScreen(ModalScreen[None]):
                 f"Shared samples: {self.analysis['shared_sample_count']} · "
                 f"Unreferenced project samples: {self.analysis['unreferenced_sample_count']} "
                 f"({format_bytes(self.analysis['unreferenced_sample_bytes'])}). "
-                "Includes kit samples and sample locks. Pool-only assets may not be in this archive; sizes do not guarantee freed RAM.",
+                f"Unresolved patterns: {self.analysis['pattern_error_count']}. "
+                "Unknown sizes are excluded; reference sizes do not guarantee freed RAM.",
                 id="memory-note",
             )
             with Vertical(id="memory-columns"):
@@ -71,7 +80,7 @@ class SampleMemoryScreen(ModalScreen[None]):
                 key=str(entry["index"]),
             )
         samples = self.query_one("#memory-samples", DataTable)
-        samples.add_columns("Sample", "Tracks", "Patterns", "Size", "Use")
+        samples.add_columns("Sample", "Tracks", "Patterns", "Size", "Audio", "Use")
         patterns.focus()
         if ranked:
             self.selected_pattern = ranked[0]["index"]
@@ -90,17 +99,21 @@ class SampleMemoryScreen(ModalScreen[None]):
         table = self.query_one("#memory-samples", DataTable)
         table.clear(columns=False)
         entry = self.analysis["patterns"][self.selected_pattern]
+        if entry.get("error"):
+            table.add_row(entry["error"], "", "", "", "unknown", "")
+            return
         for sample in entry["samples"]:
             track_text = ",".join(f"{track + 1:02}" for track in sample["tracks"])
             table.add_row(
                 sample["name"],
                 track_text,
                 str(sample["pattern_count"]),
-                format_bytes(sample["size"]),
+                format_bytes(sample["size"]) if sample.get("size_known", True) else "unknown",
+                "in archive" if sample["hash"] in self.archived_hashes else "reference only",
                 ("shared" if sample["shared"] else "unique") + (" · locked" if sample.get("sample_locked") else ""),
             )
         if not entry["samples"]:
-            table.add_row("No samples referenced by this pattern", "", "", "", "")
+            table.add_row("No samples referenced by this pattern", "", "", "", "", "")
 
     def action_close(self) -> None:
         self.dismiss(None)
