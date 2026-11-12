@@ -108,4 +108,4 @@ Older arrangement-only JSON exports can still restore all songs and their row mu
 
 ## TODO
 
-- **Song row labels** — Digitone II label display and editing are temporarily unavailable while the label field is verified; the byte previously used for labels controls repeat. Digitakt II label mapping also requires verification against the device.
+- **Song row labels** — Verify the complete label mapping against both devices. Digitone II INTRO and OUTRO have been checked on hardware; Digitakt II label encoding also requires device verification.

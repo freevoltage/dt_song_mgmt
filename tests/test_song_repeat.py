@@ -29,8 +29,13 @@ class SongRepeatTests(unittest.TestCase):
         self.assertEqual(get_all_songs_info(changed)[0]['rows'][0]['repeat'], 2)
         with self.assertRaises(ValueError):
             apply_operations(raw, [{'type': 'update_rows', 'slot': 0, 'rows': [0], 'updates': {'repeat': 100}}])
-        with self.assertRaises(ValueError):
-            apply_operations(raw, [{'type': 'update_rows', 'slot': 0, 'rows': [0], 'updates': {'label_idx': 2}}])
+        self.assertEqual(get_all_songs_info(raw)[0]['rows'][0]['label'], 'OUTRO')
+        labelled = apply_operations(raw, [{'type': 'update_rows', 'slot': 0, 'rows': [0], 'updates': {'label_idx': 2}}])
+        labelled_row = get_song_rows(get_song_slots(labelled)[0])[0]
+        self.assertEqual(labelled_row[2], 2)
+        self.assertEqual(labelled_row[:2] + labelled_row[3:], before[0][:2] + before[0][3:])
+        self.assertEqual(get_all_songs_info(labelled)[0]['rows'][0]['label'], 'INTRO')
+        self.assertEqual(get_all_songs_info(labelled)[0]['rows'][0]['repeat'], 1)
 
     def test_digitakt_keeps_existing_encoding_until_verified(self):
         raw = project(DT2_IMAGE_SIZE)

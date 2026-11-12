@@ -124,13 +124,12 @@ def parse_song_row(row: bytes, pattern_names: list[str] | None = None, *, device
     saved = ""
     if pattern_names and 0 <= pat < len(pattern_names):
         saved = pattern_names[pat]
-    tag_id = row[1]
+    tag_id = row[2] if device == "DN2" else row[1]
     return {
         "pattern": pat,
         "pattern_name": slot,
-        "label_idx": None if device == "DN2" else tag_id,
-        # The Digitone label field is not yet confirmed. Byte 1 is repeat.
-        "label": "?" if device == "DN2" else row_label(tag_id, pat, saved),
+        "label_idx": tag_id,
+        "label": row_label(tag_id, pat, saved),
         "repeat": row[1] + 1 if device == "DN2" else row[2],
         "bpm_raw": struct.unpack_from(">I", row, 3)[0],
         "mute": mute,
@@ -559,7 +558,5 @@ def update_row_fields(rec: bytes, row_indices: list[int], updates: dict, *, devi
             if "pattern" in updates and updates["pattern"] is not None:
                 row[0] = int(updates["pattern"]) & 0x7F
             if "label_idx" in updates and updates["label_idx"] is not None:
-                if device == "DN2":
-                    raise ValueError("Digitone II row labels cannot be edited until their encoding is verified")
-                row[1] = int(updates["label_idx"]) & 0xFF
+                row[2 if device == "DN2" else 1] = int(updates["label_idx"]) & 0xFF
     return set_song_rows(rec, rows)

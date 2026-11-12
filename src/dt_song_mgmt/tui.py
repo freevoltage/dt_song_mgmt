@@ -1669,9 +1669,6 @@ class ProjectBrowser(App[None]):
         self._stage_row_update({"length": length}, f"Row length set to {length}")
 
     def _toggle_label_edit(self) -> None:
-        if self.session is not None and self.session.device == "DN2":
-            self.notify("Digitone II label editing is unavailable until the label field is verified", severity="warning")
-            return
         row = self._selected_row()
         if row is None:
             return

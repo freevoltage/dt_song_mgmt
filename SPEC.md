@@ -208,7 +208,8 @@ Located at pat_base + 0x15AD4 (DN2) / pat_base + 0x15AA4 (DT2):
 - Active Row Count Sentinel: Song Base + 0x0B4B (or +0x0E61)
 - 29-byte Song Row Structure:
   - Byte 0: Pattern Index (0..127 -> Bank A..H, Pat 01..16)
-  - Digitone II byte 1: Repeat value minus 1 (verified for values 1–16). The label field is unverified.
+  - Digitone II byte 1: Repeat value minus 1 (verified for values 1–16).
+  - Digitone II byte 2: Label ID (INTRO = 2, OUTRO = 3 verified).
   - Digitakt II byte 2: Repeat count (historical interpretation; device verification needed).
   - Byte 3..6: 32-bit BPM Override (raw = BPM \* 120, 0 = Inherit pattern BPM)
   - Byte 7..8: 16-Track Mute Bitmask (Bit 0..15 = Track 1..16 Muted)
