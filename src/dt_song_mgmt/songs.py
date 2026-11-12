@@ -128,11 +128,10 @@ def parse_song_row(row: bytes, pattern_names: list[str] | None = None, *, device
     return {
         "pattern": pat,
         "pattern_name": slot,
-        "label_idx": tag_id,
-        "label": row_label(tag_id, pat, saved),
-        # Values 2 and 3 were verified as 1 and 2 on Digitone II.
-        # Zero is retained as an unknown/special value until verified.
-        "repeat": row[2] - 1 if device == "DN2" and row[2] else row[2],
+        "label_idx": None if device == "DN2" else tag_id,
+        # The Digitone label field is not yet confirmed. Byte 1 is repeat.
+        "label": "?" if device == "DN2" else row_label(tag_id, pat, saved),
+        "repeat": row[1] + 1 if device == "DN2" else row[2],
         "bpm_raw": struct.unpack_from(">I", row, 3)[0],
         "mute": mute,
         "mute_mask": mute,
@@ -546,8 +545,9 @@ def update_row_fields(rec: bytes, row_indices: list[int], updates: dict, *, devi
                 if device == "DN2":
                     if not 1 <= repeat <= 99:
                         raise ValueError("Digitone II repeat must be between 1 and 99")
-                    repeat += 1
-                row[2] = repeat & 0xFF
+                    row[1] = repeat - 1
+                else:
+                    row[2] = repeat & 0xFF
             if "bpm_raw" in updates and updates["bpm_raw"] is not None:
                 struct.pack_into(">I", row, 3, int(updates["bpm_raw"]) & 0xFFFFFFFF)
             if "mute_mask" in updates and updates["mute_mask"] is not None:
@@ -559,5 +559,7 @@ def update_row_fields(rec: bytes, row_indices: list[int], updates: dict, *, devi
             if "pattern" in updates and updates["pattern"] is not None:
                 row[0] = int(updates["pattern"]) & 0x7F
             if "label_idx" in updates and updates["label_idx"] is not None:
+                if device == "DN2":
+                    raise ValueError("Digitone II row labels cannot be edited until their encoding is verified")
                 row[1] = int(updates["label_idx"]) & 0xFF
     return set_song_rows(rec, rows)

@@ -108,4 +108,4 @@ Older arrangement-only JSON exports can still restore all songs and their row mu
 
 ## TODO
 
-- **Song row labels** — Verify the complete LABEL keyword/tag mapping against both devices. The TUI editor currently uses the labels recognized by `SONG_ROW_LABELS`; unknown raw tag IDs remain editable as `T<number>`.
+- **Song row labels** — Digitone II label display and editing are temporarily unavailable while the label field is verified; the byte previously used for labels controls repeat. Digitakt II label mapping also requires verification against the device.
