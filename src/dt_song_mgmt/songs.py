@@ -548,8 +548,8 @@ def update_row_fields(rec: bytes, row_indices: list[int], updates: dict, *, devi
                 struct.pack_into(">I", row, 3, int(updates["bpm_raw"]) & 0xFFFFFFFF)
             if "mute_mask" in updates and updates["mute_mask"] is not None:
                 m = int(updates["mute_mask"]) & 0xFFFF
-                row[7] = (m >> 8) & 0xFF
-                row[8] = m & 0xFF
+                row[7] = m & 0xFF
+                row[8] = (m >> 8) & 0xFF
             if "length" in updates and updates["length"] is not None:
                 struct.pack_into(">H", row, 9, int(updates["length"]) & 0xFFFF)
             if "pattern" in updates and updates["pattern"] is not None:
