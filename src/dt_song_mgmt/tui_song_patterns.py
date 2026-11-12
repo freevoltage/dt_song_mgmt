@@ -17,13 +17,15 @@ class SongPatternOverviewScreen(ModalScreen[None]):
     """List each song's distinct patterns and their row usage counts."""
 
     CSS = """
-    SongPatternOverviewScreen { align: center middle; background: $background 60%; }
-    #song-pattern-window { width: 96%; height: 92%; border: round $primary; background: $surface; padding: 1 2; }
-    #song-pattern-heading { height: 1; color: $text; text-style: bold; }
+    SongPatternOverviewScreen { align: left top; background: #101010; color: #dedbd2; }
+    #song-pattern-window { width: 100%; height: 100%; background: #101010; padding: 0 2; }
+    #song-pattern-heading { height: 1; color: #e4e0d6; text-style: bold; }
     #song-pattern-columns { height: 1fr; layout: horizontal; margin-top: 1; }
     #overview-songs { width: 1fr; }
     #overview-patterns { width: 1fr; margin-left: 1; }
-    DataTable:focus { border: tall $accent; }
+    DataTable { background: #111111; border: none; }
+    DataTable > .datatable--header { background: #191919; color: #a49f93; }
+    DataTable > .datatable--cursor { background: #d6a04b; color: #15120d; text-style: bold; }
     """
 
     BINDINGS = [("escape", "close", "Back"), ("q", "close", "Back")]
@@ -38,7 +40,7 @@ class SongPatternOverviewScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="song-pattern-window"):
-            yield Static("SONG PATTERN OVERVIEW · SELECT A SONG TO SEE ITS PATTERNS", id="song-pattern-heading")
+            yield Static("SONG → PATTERNS   Select a song · Esc back", id="song-pattern-heading")
             with Horizontal(id="song-pattern-columns"):
                 yield DataTable(id="overview-songs", cursor_type="row", zebra_stripes=True)
                 yield DataTable(id="overview-patterns", cursor_type="row", zebra_stripes=True)

@@ -28,11 +28,11 @@ class EntryModal(ModalScreen[str | None]):
     """Small input prompt for a single TUI action."""
 
     CSS = """
-    EntryModal { align: center middle; background: $background 60%; }
-    #entry-dialog { width: 64; height: auto; padding: 1 2; border: round $primary; background: $surface; }
+    EntryModal { align: center middle; background: #000000 70%; }
+    #entry-dialog { width: 64; height: auto; padding: 1 2; border: solid #c18a3c; background: #111111; }
     #entry-dialog Input { margin: 1 0; }
     #entry-buttons { height: 3; align-horizontal: right; }
-    #entry-buttons Button { margin-left: 1; }
+    #entry-buttons Button { margin-left: 1; border: none; background: #222222; color: #dedbd2; }
     """
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -72,10 +72,10 @@ class ConfirmModal(ModalScreen[bool]):
     """Confirm a file overwrite or staged restore without writing yet."""
 
     CSS = """
-    ConfirmModal { align: center middle; background: $background 60%; }
-    #generic-confirm-dialog { width: 76; height: auto; padding: 1 2; border: round $warning; background: $surface; }
+    ConfirmModal { align: center middle; background: #000000 70%; }
+    #generic-confirm-dialog { width: 76; height: auto; padding: 1 2; border: solid #c18a3c; background: #111111; }
     #generic-confirm-buttons { height: 3; align-horizontal: right; }
-    #generic-confirm-buttons Button { margin-left: 1; }
+    #generic-confirm-buttons Button { margin-left: 1; border: none; background: #222222; color: #dedbd2; }
     """
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -104,11 +104,11 @@ class SaveValidationModal(ModalScreen[bool]):
     """Show pre-save checks before a project is written."""
 
     CSS = """
-    SaveValidationModal { align: center middle; background: $background 60%; }
-    #save-validation-dialog { width: 96; height: auto; max-height: 90%; padding: 1 2; border: round $primary; background: $surface; }
+    SaveValidationModal { align: center middle; background: #000000 70%; }
+    #save-validation-dialog { width: 96; height: auto; max-height: 90%; padding: 1 2; border: solid #c18a3c; background: #111111; }
     #save-validation-results { height: auto; max-height: 1fr; margin: 1 0; }
     #save-validation-buttons { height: 3; align-horizontal: right; }
-    #save-validation-buttons Button { margin-left: 1; }
+    #save-validation-buttons Button { margin-left: 1; border: none; background: #222222; color: #dedbd2; }
     """
     BINDINGS = [("escape", "cancel", "Back")]
 
@@ -154,10 +154,10 @@ class UnsavedExitModal(ModalScreen[str | None]):
     """Offer explicit choices before closing a session with staged edits."""
 
     CSS = """
-    UnsavedExitModal { align: center middle; background: $background 60%; }
-    #exit-dialog { width: 72; height: auto; padding: 1 2; border: round $warning; background: $surface; }
+    UnsavedExitModal { align: center middle; background: #000000 70%; }
+    #exit-dialog { width: 72; height: auto; padding: 1 2; border: solid #c18a3c; background: #111111; }
     #exit-buttons { height: 3; align-horizontal: right; }
-    #exit-buttons Button { margin-left: 1; }
+    #exit-buttons Button { margin-left: 1; border: none; background: #222222; color: #dedbd2; }
     """
     BINDINGS = [("escape", "stay", "Stay")]
 
@@ -189,69 +189,87 @@ class ProjectBrowser(App[None]):
     CSS = """
     Screen {
         layout: vertical;
-        background: #101318;
+        background: #101010;
     }
     #project-header {
-        height: 3;
+        height: 2;
         padding: 0 2;
-        background: #202630;
-        border-bottom: tall #3a4655;
+        background: #101010;
+        border-bottom: solid #37342e;
     }
     #project-tabs {
-        height: 3;
-        background: #171c23;
+        height: 2;
+        background: #101010;
         padding: 0 1;
     }
+    Tabs { background: #101010; }
+    Tab { background: #101010; color: #8d887d; border: none; }
+    Tab.-active { background: #101010; color: #d6a04b; text-style: bold; }
+    Tabs > .underline--bar { color: #d6a04b; background: #d6a04b; }
     #project-banner {
         width: 1fr;
         content-align: left middle;
-        color: #f3f4f6;
+        color: #e4e0d6;
         text-style: bold;
     }
     #device-banner {
         width: auto;
         min-width: 26;
         content-align: right middle;
-        color: #8fd3c7;
+        color: #d6a04b;
         text-style: bold;
     }
     #workspace {
         height: 1fr;
-        padding: 1 1 0 1;
+        padding: 0 2;
         layout: horizontal;
     }
     #songs-pane {
         width: 30;
         min-width: 24;
-        border: round #3b4654;
-        padding: 0 1;
+        border-right: solid #37342e;
+        padding: 0 2 0 0;
     }
     #rows-pane {
         width: 1fr;
         min-width: 32;
-        border: round #3b4654;
-        padding: 0 1;
+        padding: 0 0 0 2;
     }
     .pane-title {
-        height: 1;
-        margin: 0 0 1 0;
-        color: #8fd3c7;
+        height: 2;
+        margin: 0;
+        color: #a49f93;
         text-style: bold;
     }
     DataTable {
         height: 1fr;
-        background: #101318;
-        border: tall #3b4654;
+        background: #101010;
+        border: none;
     }
-    DataTable:focus {
-        border: tall #8fd3c7;
+    DataTable > .datatable--header {
+        background: #191919;
+        color: #a49f93;
+    }
+    DataTable > .datatable--cursor {
+        background: #25221c;
+        color: #f1c36d;
+        text-style: bold;
+    }
+    DataTable:focus > .datatable--cursor {
+        background: #d6a04b;
+        color: #15120d;
     }
     #message {
-        height: 1;
-        color: #b3bdc9;
+        height: 2;
+        color: #a49f93;
         padding: 0 2;
-        background: #202630;
+        background: #101010;
+        border-top: solid #37342e;
     }
+    Footer { background: #101010; color: #a49f93; }
+    FooterKey { background: #101010; }
+    FooterKey > .footer-key--key { background: #25221c; color: #d6a04b; }
+    Button { border: none; background: #222222; color: #dedbd2; }
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -308,7 +326,7 @@ class ProjectBrowser(App[None]):
         self.session: ProjectSession | None = None
         self.sessions: list[ProjectSession] = []
         self._tab_sessions: dict[str, ProjectSession] = {}
-        self.clipboard: dict | None = None
+        self._dsm_clipboard: dict | None = None
         self._active_tab_id = "project-0"
         self.active_song_slot = 0
         self.active_row_index: int | None = None
@@ -343,7 +361,7 @@ class ProjectBrowser(App[None]):
         self._set_song_clipboard("copy")
 
     def _set_song_clipboard(self, mode: str) -> None:
-        self.clipboard = {
+        self._dsm_clipboard = {
             "kind": "song",
             "mode": mode,
             "session": self.session,
@@ -383,7 +401,7 @@ class ProjectBrowser(App[None]):
         return result
 
     def _paste_song_clipboard(self) -> None:
-        clipboard = self.clipboard
+        clipboard = self._dsm_clipboard
         if not clipboard or clipboard.get("kind") != "song":
             self.notify("Song clipboard is empty", severity="warning")
             return
@@ -448,7 +466,7 @@ class ProjectBrowser(App[None]):
             self.notify(f"Could not paste song bundle: {exc}", severity="error", timeout=10)
             return
         if clipboard["mode"] == "cut":
-            self.clipboard = None
+            self._dsm_clipboard = None
             self.notify(
                 f"Moved song {source_slot:02d} to slot {destination_slot:02d}; both project drafts are staged. Press s to save each project."
             )

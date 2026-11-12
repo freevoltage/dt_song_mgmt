@@ -15,14 +15,16 @@ class SampleMemoryScreen(ModalScreen[None]):
     """Show project sample totals and per-pattern sample references."""
 
     CSS = """
-    SampleMemoryScreen { align: center middle; background: $background 60%; }
-    #memory-window { width: 96%; height: 94%; border: round $primary; background: $surface; padding: 1 2; }
-    #memory-heading { height: 2; color: $text; text-style: bold; }
-    #memory-note { height: 2; color: $text-muted; }
+    SampleMemoryScreen { align: left top; background: #101010; color: #dedbd2; }
+    #memory-window { width: 100%; height: 100%; background: #101010; padding: 0 2; }
+    #memory-heading { height: 2; color: #e4e0d6; text-style: bold; }
+    #memory-note { height: 2; color: #a49f93; }
     #memory-columns { height: 1fr; layout: horizontal; }
     #memory-patterns { width: 2fr; }
     #memory-samples { width: 3fr; margin-left: 1; }
-    DataTable:focus { border: tall $accent; }
+    DataTable { background: #111111; border: none; }
+    DataTable > .datatable--header { background: #191919; color: #a49f93; }
+    DataTable > .datatable--cursor { background: #d6a04b; color: #15120d; text-style: bold; }
     """
 
     BINDINGS = [("escape", "close", "Back"), ("q", "close", "Back")]

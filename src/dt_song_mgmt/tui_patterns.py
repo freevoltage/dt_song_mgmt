@@ -17,11 +17,11 @@ class PatternEntryModal(ModalScreen[str | None]):
     """Prompt for a pattern slot, name, or source project path."""
 
     CSS = """
-    PatternEntryModal { align: center middle; background: $background 60%; }
-    #pattern-entry-dialog { width: 68; height: auto; padding: 1 2; border: round $primary; background: $surface; }
+    PatternEntryModal { align: center middle; background: #000000 70%; }
+    #pattern-entry-dialog { width: 68; height: auto; padding: 1 2; border: solid #c18a3c; background: #111111; }
     #pattern-entry-dialog Input { margin: 1 0; }
     #pattern-entry-buttons { height: 3; align-horizontal: right; }
-    #pattern-entry-buttons Button { margin-left: 1; }
+    #pattern-entry-buttons Button { margin-left: 1; border: none; background: #222222; color: #dedbd2; }
     """
 
     BINDINGS = [("escape", "cancel", "Cancel")]
@@ -62,12 +62,20 @@ class PatternManagerScreen(ModalScreen[None]):
     """Search and stage operations on the 128 pattern slots."""
 
     CSS = """
-    PatternManagerScreen { align: center middle; background: $background 60%; }
-    #pattern-window { width: 94%; height: 90%; border: round $primary; background: $surface; padding: 1 2; }
-    #pattern-heading { height: 1; color: $text; text-style: bold; }
-    #pattern-search { height: 3; margin: 1 0; }
-    #pattern-table { height: 1fr; }
-    DataTable:focus { border: tall $accent; }
+    PatternManagerScreen { align: left top; background: #101010; color: #dedbd2; }
+    #pattern-workspace { width: 100%; height: 100%; padding: 0 2; }
+    #pattern-topline { height: 2; padding-top: 1; }
+    #pattern-heading { width: 1fr; color: #e4e0d6; text-style: bold; }
+    #pattern-project { width: auto; color: #a49f93; }
+    #pattern-banks { height: 2; color: #a49f93; padding-top: 1; border-bottom: solid #37342e; }
+    #pattern-search { height: 3; margin: 1 0; border: none; border-bottom: solid #37342e; background: #101010; }
+    #pattern-search:focus { border-bottom: solid #d6a04b; }
+    #pattern-table { height: 1fr; background: #101010; border: none; }
+    #pattern-table > .datatable--header { background: #191919; color: #a49f93; }
+    #pattern-table > .datatable--cursor { background: #25221c; color: #f1c36d; text-style: bold; }
+    #pattern-table:focus > .datatable--cursor { background: #d6a04b; color: #15120d; }
+    #pattern-selection { height: 2; padding: 0 1; color: #f1c36d; border-top: solid #37342e; }
+    #pattern-help { height: 2; color: #8d887d; padding: 0 1; }
     """
 
     BINDINGS = [
@@ -100,12 +108,23 @@ class PatternManagerScreen(ModalScreen[None]):
         self.selected_pattern = 0
         self.filter_text = ""
         self.bank_filter = bank_filter
+        self._all_patterns: list[dict] = []
+        self._visible_patterns: list[dict] = []
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="pattern-window"):
-            yield Static("PATTERN MANAGER", id="pattern-heading")
+        with Vertical(id="pattern-workspace"):
+            with Horizontal(id="pattern-topline"):
+                yield Static("PATTERNS", id="pattern-heading")
+                yield Static("", id="pattern-project")
+            yield Static("", id="pattern-banks")
             yield Input(placeholder="Filter by bank, slot, or pattern name…", id="pattern-search")
             yield DataTable(id="pattern-table", cursor_type="row", zebra_stripes=True)
+            yield Static("", id="pattern-selection")
+            yield Static(
+                "↑/↓ select · PgUp/PgDn scroll · 1–8 banks · 0 all · / search\n"
+                "c copy · m move · d clear · r rename · i import · y copy · x cut · p paste",
+                id="pattern-help",
+            )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -126,29 +145,44 @@ class PatternManagerScreen(ModalScreen[None]):
             self.selected_pattern = int(event.row_key.value)
         except (TypeError, ValueError):
             pass
-
-    def _visible_patterns(self) -> list[dict]:
-        patterns = get_all_patterns_info(self.session.working_raw())
-        if self.bank_filter is not None:
-            patterns = [pattern for pattern in patterns if pattern["index"] // 16 == self.bank_filter]
-        if not self.filter_text:
-            return patterns
-        return [
-            pattern for pattern in patterns
-            if self.filter_text in pattern["label"].casefold()
-            or self.filter_text in pattern["name"].casefold()
-        ]
+        self._refresh_selection()
 
     def _refresh_table(self) -> None:
         table = self.query_one("#pattern-table", DataTable)
-        patterns = self._visible_patterns()
+        all_patterns = get_all_patterns_info(self.session.working_raw())
+        self._all_patterns = all_patterns
+        patterns = all_patterns
+        if self.bank_filter is not None:
+            patterns = [pattern for pattern in patterns if pattern["index"] // 16 == self.bank_filter]
+        if self.filter_text:
+            patterns = [
+                pattern for pattern in patterns
+                if self.filter_text in pattern["label"].casefold()
+                or self.filter_text in pattern["name"].casefold()
+            ]
+        self._visible_patterns = patterns
+        named_count = sum(bool(pattern["name"].strip()) for pattern in all_patterns)
         bank_label = "ALL BANKS" if self.bank_filter is None else f"BANK {chr(ord('A') + self.bank_filter)}"
-        heading = f"PATTERN MANAGER · {bank_label} · 1–8 SELECT BANK · 0 ALL"
+        heading = f"PATTERN MANAGER    {bank_label} · {len(patterns)} slots · {named_count}/128 named"
         clipboard = self._clipboard()
         if clipboard:
             action = "CUT" if clipboard["mode"] == "cut" else "COPY"
-            heading += f" · CLIPBOARD {action} {pattern_label(clipboard['slot'])}"
+            heading += f"    CLIPBOARD {action} {pattern_label(clipboard['slot'])}"
         self.query_one("#pattern-heading", Static).update(heading)
+        draft_status = f"DRAFT · {len(self.session.operations)} edits" if self.session.operations else "CLEAN"
+        self.query_one("#pattern-project", Static).update(
+            f"{self.session.device}  /  {self.session.path.name}  ·  {draft_status}"
+        )
+        bank_items = []
+        for bank in range(8):
+            name = chr(ord("A") + bank)
+            bank_items.append(
+                f"[{name} {bank + 1}]" if self.bank_filter == bank else f" {name} {bank + 1} "
+            )
+        all_marker = "[ALL 0]" if self.bank_filter is None else " ALL 0 "
+        self.query_one("#pattern-banks", Static).update(
+            f"BANKS   {'  '.join(bank_items)}     {all_marker}"
+        )
         table.clear(columns=False)
         for pattern in patterns:
             name = pattern["name"].strip() or "(unnamed)"
@@ -163,6 +197,23 @@ class PatternManagerScreen(ModalScreen[None]):
             if self.selected_pattern not in visible_indices:
                 self.selected_pattern = visible_indices[0]
             table.move_cursor(row=visible_indices.index(self.selected_pattern), column=0)
+        self._refresh_selection()
+
+    def _refresh_selection(self) -> None:
+        if not self.is_mounted:
+            return
+        pattern = next(
+            (item for item in self._visible_patterns if item["index"] == self.selected_pattern),
+            None,
+        )
+        if pattern is None:
+            detail = "No pattern slots match this search. Clear the search field to show slots again."
+        else:
+            name = pattern["name"].strip() or "(unnamed)"
+            refs = pattern["ref_count"]
+            row_text = "song rows reference it" if refs != 1 else "song row references it"
+            detail = f"{pattern['label']}   {name}   ·   {refs} {row_text}"
+        self.query_one("#pattern-selection", Static).update(detail)
 
     def action_focus_filter(self) -> None:
         self.query_one("#pattern-search", Input).focus()
@@ -207,12 +258,12 @@ class PatternManagerScreen(ModalScreen[None]):
             self.app.notify(str(exc), severity="error", timeout=8)
 
     def _clipboard(self) -> dict | None:
-        value = getattr(self.clipboard_owner, "clipboard", None)
+        value = getattr(self.clipboard_owner, "_dsm_clipboard", None)
         return value if value and value.get("kind") == "pattern" else None
 
     def _set_clipboard(self, value: dict | None) -> None:
         if self.clipboard_owner is not None:
-            self.clipboard_owner.clipboard = value
+            self.clipboard_owner._dsm_clipboard = value
 
     def action_yank_pattern(self) -> None:
         self._set_clipboard({
