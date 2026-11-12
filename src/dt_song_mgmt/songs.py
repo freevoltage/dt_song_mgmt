@@ -24,6 +24,7 @@ from .constants import (
     SONG_TRACKS,
     SONG_ROW_LABELS,
     pattern_name_offset,
+    device_name,
 )
 
 
@@ -111,7 +112,7 @@ def song_row_count(rec: bytes) -> int:
     return SONG_ROW_MAX
 
 
-def parse_song_row(row: bytes, pattern_names: list[str] | None = None) -> dict:
+def parse_song_row(row: bytes, pattern_names: list[str] | None = None, *, device: str | None = None) -> dict:
     mute = row[7] | (row[8] << 8)
     length = struct.unpack_from(">H", row, 9)[0]
     if length > 1024:
@@ -129,7 +130,9 @@ def parse_song_row(row: bytes, pattern_names: list[str] | None = None) -> dict:
         "pattern_name": slot,
         "label_idx": tag_id,
         "label": row_label(tag_id, pat, saved),
-        "repeat": row[2],
+        # Values 2 and 3 were verified as 1 and 2 on Digitone II.
+        # Zero is retained as an unknown/special value until verified.
+        "repeat": row[2] - 1 if device == "DN2" and row[2] else row[2],
         "bpm_raw": struct.unpack_from(">I", row, 3)[0],
         "mute": mute,
         "mute_mask": mute,
@@ -137,14 +140,14 @@ def parse_song_row(row: bytes, pattern_names: list[str] | None = None) -> dict:
     }
 
 
-def parse_song(rec: bytes, pattern_names: list[str] | None = None) -> dict:
+def parse_song(rec: bytes, pattern_names: list[str] | None = None, *, device: str | None = None) -> dict:
     n = song_row_count(rec)
     rows = []
     for i in range(n):
         off = SONG_ROW_OFF + i * SONG_ROW_SIZE
         if off + SONG_ROW_SIZE > len(rec):
             break
-        rows.append(parse_song_row(rec[off : off + SONG_ROW_SIZE], pattern_names))
+        rows.append(parse_song_row(rec[off : off + SONG_ROW_SIZE], pattern_names, device=device))
     default_bpm = None
     if len(rec) >= SONG_TEMPO_OFF + 2:
         rawb = struct.unpack_from(">H", rec, SONG_TEMPO_OFF)[0]
@@ -167,10 +170,10 @@ def mute_pads_html(mute: int) -> str:
     return '<td class="mutes"><div class="pads">' f'<div class="pad-row">{upper}</div>' f'<div class="pad-row">{lower}</div>' "</div></td>"
 
 
-def render_songs_html(title: str, slots: list[bytes], pattern_names: list[str] | None = None) -> str:
+def render_songs_html(title: str, slots: list[bytes], pattern_names: list[str] | None = None, *, device: str | None = None) -> str:
     from html import escape
 
-    parsed = [parse_song(rec, pattern_names) for rec in slots]
+    parsed = [parse_song(rec, pattern_names, device=device) for rec in slots]
     toc = []
     sections = []
     for i, song in enumerate(parsed):
@@ -357,6 +360,7 @@ def restore_song_arrangement(raw: bytes, songs: list[dict]) -> bytes:
                 raise ValueError(f"song slot {slot_idx} row {row_idx + 1} has an invalid mute mask or length")
             row[0] = values["pattern"]
             row[1] = values["label_idx"]
+            # Legacy arrangement exports stored the encoded byte, not the device display.
             row[2] = values["repeat"]
             struct.pack_into(">I", row, 3, values["bpm_raw"])
             row[7] = values["mute_mask"] & 0xFF
@@ -516,8 +520,8 @@ def copy_song_slot(raw: bytes, src_slot: int, dst_slot: int) -> bytes:
     return set_song_slots(raw, slots)
 
 
-def get_song_info(rec: bytes, pattern_names: list[str] | None = None) -> dict:
-    p = parse_song(rec, pattern_names)
+def get_song_info(rec: bytes, pattern_names: list[str] | None = None, *, device: str | None = None) -> dict:
+    p = parse_song(rec, pattern_names, device=device)
     return {"name": p["name"], "row_count": len(p["rows"]), "rows": p["rows"], "default_bpm": p.get("default_bpm")}
 
 
@@ -526,19 +530,24 @@ def get_all_songs_info(raw: bytes) -> list[dict]:
     slots = get_song_slots(raw)
     result = []
     for i, rec in enumerate(slots):
-        info = get_song_info(rec, pattern_names)
+        info = get_song_info(rec, pattern_names, device=device_name(raw))
         info["slot"] = i
         result.append(info)
     return result
 
 
-def update_row_fields(rec: bytes, row_indices: list[int], updates: dict) -> bytes:
+def update_row_fields(rec: bytes, row_indices: list[int], updates: dict, *, device: str | None = None) -> bytes:
     rows = get_song_rows(rec)
     for idx in row_indices:
         if 0 <= idx < len(rows):
             row = rows[idx]
             if "repeat" in updates and updates["repeat"] is not None:
-                row[2] = int(updates["repeat"]) & 0xFF
+                repeat = int(updates["repeat"])
+                if device == "DN2":
+                    if not 1 <= repeat <= 99:
+                        raise ValueError("Digitone II repeat must be between 1 and 99")
+                    repeat += 1
+                row[2] = repeat & 0xFF
             if "bpm_raw" in updates and updates["bpm_raw"] is not None:
                 struct.pack_into(">I", row, 3, int(updates["bpm_raw"]) & 0xFFFFFFFF)
             if "mute_mask" in updates and updates["mute_mask"] is not None:

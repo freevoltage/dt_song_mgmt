@@ -86,7 +86,7 @@ def apply_operations(raw: bytes, operations: list[dict]) -> bytes:
             slot = op["slot"]
             rows = op["rows"]
             updates = op.get("updates", {})
-            slots[slot] = update_row_fields(slots[slot], rows, updates)
+            slots[slot] = update_row_fields(slots[slot], rows, updates, device=device_name(raw))
         elif op_type == "clear_song":
             slot = op["slot"]
             from .songs import clear_song

@@ -529,7 +529,7 @@ class ProjectSession:
         pattern_names = collect_pattern_names(new_raw)
         songs = []
         for index, record in enumerate(get_song_slots(new_raw)):
-            info = get_song_info(record, pattern_names)
+            info = get_song_info(record, pattern_names, device=device_name(new_raw, self.path.suffix))
             info["slot"] = index
             songs.append(info)
 
