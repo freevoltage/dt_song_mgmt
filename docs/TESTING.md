@@ -99,7 +99,8 @@ back together. Backups remain available for each saved project.
 
 These checks establish the supported software workflows for a beta candidate.
 They do not establish hardware or firmware compatibility beyond the device
-checks recorded below. `TASKS.md` tracks the remaining release checks and user
+checks recorded below. The sample-remapping regression also covers track 16,
+step 128, the final lock record, and destination pattern H16. `TASKS.md` tracks the remaining release checks and user
 review; no release is merged automatically.
 
 ## What still needs a device
@@ -109,7 +110,9 @@ we expect. They cannot prove that every firmware version interprets those bytes
 as intended, or that copied patterns sound identical. Hardware-created debug
 projects remain the evidence for interpreting new fields. Repeat and label edits
 have been confirmed on Digitone II hardware; the same song-row layout is used
-for Digitakt II under the shared-format assumption.
+for Digitakt II under the shared-format assumption. The user also confirmed a
+basic song-and-sample copy into an empty Digitakt II project on hardware. Physical
+track mute ordering and RAM estimates still need device comparison.
 
 When investigating a new field, record its raw bytes and the device-displayed
 values before changing the parser. Keep regression fixtures minimal and generated
@@ -117,7 +120,18 @@ where possible; do not commit personal projects or sample libraries.
 
 ## Beta validation record
 
-On 24 November 2026, the reliable-beta candidate passed all 46 tests locally on
-Apple Silicon with Python 3.14 (281 seconds). The installed `dsm --help` command
-also passed. CI validation is tracked in `TASKS.md`; remaining device checks are
-listed there separately. The candidate is not merged until the user approves.
+On 24 November 2026, the strengthened integration suite passed all 46 tests
+locally on Apple Silicon with Python 3.14 (359 seconds). The additional last-track
+and last-step sample-remapping test passed separately, bringing coverage to 47
+distinct regressions. The installed `dsm --help` command also passed. A deliberate
+partial sound-kit copy was rejected by the transfer regression, confirming that
+its fixture detects omitted sound data.
+
+The [final CI run](https://github.com/freevoltage/dt_song_mgmt/actions/runs/45414066521)
+for code revision `f6b904c` passed the complete 47-test suite and installed CLI
+check in all four combinations: Linux / macOS 15 Intel, Python 3.10 / 3.14.
+Only documentation was updated after this tested revision.
+
+The automated beta acceptance checks are complete. `TASKS.md` tracks remaining
+device verification and the user's review. The candidate is not merged until
+the user approves.
