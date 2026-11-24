@@ -37,6 +37,30 @@ GitHub Actions runs the full suite for pushes and pull requests on macOS and
 Linux, with Python 3.10 (the declared minimum) and 3.14. The workflow must be
 pushed to GitHub before those checks run there.
 
+## Automatic TUI workflows
+
+The UI workflow test starts the real Textual application with its headless test
+terminal. It opens a generated project through the picker using keyboard events,
+renames a song, edits its repeat and inline label, toggles track 1, uses undo/redo,
+saves through the validation dialog, quits, and opens the app again. It checks
+the displayed state, saved mute bytes and backup for both device formats.
+Project sessions, saving and project data are real; only the picker's starting
+folder is supplied as a test environment setting.
+
+Run this workflow alone with:
+
+```sh
+python -m unittest discover -s tests -p 'test_tui_workflows.py' -v
+```
+
+A second workflow checks cancelling deletion and saving, staying in a dirty
+project, and explicitly discarding changes on quit.
+
+Both run automatically with the full suite and in the configured CI jobs.
+Use these workflows for routine UI regression checks instead of manually repeating
+the same key sequences. They exercise the app in an invisible terminal, so they
+cannot validate a particular terminal emulator's font or key encoding.
+
 ## What still needs a device
 
 Generated fixtures prove that DSM preserves and transforms the bytes and assets
