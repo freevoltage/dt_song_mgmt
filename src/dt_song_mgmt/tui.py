@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Input, Label, OptionList, Static, Tab, Tabs
 
 from .constants import SONG_ROW_LABELS, SONG_SIZE
-from .session import ProjectSession
+from .session import ProjectSession, staged_transaction
 from .pattern_steps import pattern_trigs
 from .songs import (
     SONG_ROW_MAX,
@@ -901,33 +901,30 @@ class ProjectBrowser(App[None]):
             return
         source_session = clipboard.get("session")
         source_slot = int(clipboard["slot"]) if source_session is not None else None
-        destination_staged = False
+        sessions = (self.session, source_session) if source_session is not None else (self.session,)
         try:
-            if selection["mode"] == "arrangement":
-                same_project_cut = clipboard["mode"] == "cut" and source_session is self.session
-                self.session.stage_song_arrangement_paste(
-                    destination_slot, record, source_slot if same_project_cut else None,
-                )
-                destination_staged = True
-                if clipboard["mode"] == "cut" and not same_project_cut:
-                    source_session.stage({"type": "empty_song", "slot": source_slot})
-            else:
-                if source_session is None or source_raw is None or source_slot is None:
-                    raise ValueError("this arrangement file does not contain patterns")
-                source_members = source_session.working_members()
-                source_manifest = json.loads(
-                    next(data for info, data in source_members if info.filename == "manifest.json")
-                )
-                self.session.stage_song_bundle_import(
-                    source_session.path, source_slot, destination_slot, selection["mappings"],
-                    source_raw=source_raw, source_manifest=source_manifest, source_members=source_members,
-                )
-                destination_staged = True
-                if clipboard["mode"] == "cut":
-                    source_session.stage_song_bundle_cut(source_slot)
+            with staged_transaction(*sessions):
+                if selection["mode"] == "arrangement":
+                    same_project_cut = clipboard["mode"] == "cut" and source_session is self.session
+                    self.session.stage_song_arrangement_paste(
+                        destination_slot, record, source_slot if same_project_cut else None,
+                    )
+                    if clipboard["mode"] == "cut" and not same_project_cut:
+                        source_session.stage({"type": "empty_song", "slot": source_slot})
+                else:
+                    if source_session is None or source_raw is None or source_slot is None:
+                        raise ValueError("this arrangement file does not contain patterns")
+                    source_members = source_session.working_members()
+                    source_manifest = json.loads(
+                        next(data for info, data in source_members if info.filename == "manifest.json")
+                    )
+                    self.session.stage_song_bundle_import(
+                        source_session.path, source_slot, destination_slot, selection["mappings"],
+                        source_raw=source_raw, source_manifest=source_manifest, source_members=source_members,
+                    )
+                    if clipboard["mode"] == "cut":
+                        source_session.stage_song_bundle_cut(source_slot)
         except Exception as exc:
-            if destination_staged:
-                self.session.undo()
             self.notify(f"Could not paste song bundle: {exc}", severity="error", timeout=10)
             return
         if clipboard["mode"] == "cut":

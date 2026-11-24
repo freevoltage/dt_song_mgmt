@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static
 
 from .patterns import get_all_patterns_info
+from .session import staged_transaction
 from .pattern_steps import pattern_trigs
 from .songs import pattern_label
 
@@ -510,6 +511,9 @@ class PatternManagerScreen(ModalScreen[None]):
             self.app.notify("Pattern clipboard is empty", severity="warning")
             return
         source_session = clipboard["session"]
+        if source_session.device != self.session.device:
+            self.app.notify("Patterns can only be pasted between matching device types", severity="error")
+            return
         source = clipboard["slot"]
         destination = self.selected_pattern
         is_cut = clipboard["mode"] == "cut"
@@ -527,22 +531,20 @@ class PatternManagerScreen(ModalScreen[None]):
             )
             return
         try:
-            if source_session is self.session:
-                if is_cut:
-                    self.session.stage_pattern_move(source, destination)
+            with staged_transaction(self.session, source_session):
+                if source_session is self.session:
+                    if is_cut:
+                        self.session.stage_pattern_move(source, destination)
+                    else:
+                        self.session.stage({"type": "pattern_copy", "src_idx": source, "dst_idx": destination})
                 else:
-                    self.session.stage({"type": "pattern_copy", "src_idx": source, "dst_idx": destination})
-            else:
-                source_raw = source_session.working_raw()
-                source_members = source_session.working_members()
-                source_manifest = json.loads(
-                    next(data for info, data in source_members if info.filename == "manifest.json")
-                )
-                source_cut_staged = False
-                if is_cut:
-                    source_session.stage_pattern_bundle_cut(source)
-                    source_cut_staged = True
-                try:
+                    source_raw = source_session.working_raw()
+                    source_members = source_session.working_members()
+                    source_manifest = json.loads(
+                        next(data for info, data in source_members if info.filename == "manifest.json")
+                    )
+                    if is_cut:
+                        source_session.stage_pattern_bundle_cut(source)
                     self.session.stage_pattern_import(
                         source_session.path,
                         [{"src_idx": source, "dst_idx": destination}],
@@ -550,10 +552,6 @@ class PatternManagerScreen(ModalScreen[None]):
                         source_manifest=source_manifest,
                         source_members=source_members,
                     )
-                except Exception:
-                    if source_cut_staged:
-                        source_session.undo()
-                    raise
         except Exception as exc:
             self.app.notify(f"Could not paste pattern: {exc}", severity="error", timeout=8)
             return

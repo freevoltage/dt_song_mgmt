@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import shutil
+from contextlib import contextmanager
 from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -52,6 +53,25 @@ from .songs import (
     song_table_off,
 )
 from .state import apply_operations
+
+
+@contextmanager
+def staged_transaction(*sessions: ProjectSession):
+    """Keep paired draft operations and undo/redo history atomic on failure.
+
+    This wraps in-memory staging only. Saving separate files remains explicit.
+    """
+    checkpoints = {
+        id(session): (session, list(session.operations), list(session.redo_operations))
+        for session in sessions
+    }
+    try:
+        yield
+    except Exception:
+        for session, operations, redo_operations in checkpoints.values():
+            session.operations = operations
+            session.redo_operations = redo_operations
+        raise
 
 
 class ProjectSession:
@@ -675,6 +695,8 @@ class ProjectSession:
                 source_manifest = loaded_manifest
             if source_members is None:
                 source_members = loaded_members
+        if device_name(source_raw, source.suffix) != self.device:
+            raise ValueError("patterns can only be imported between matching devices")
         operation = {
             "type": "pattern_import",
             "src_path": str(source),
@@ -746,6 +768,8 @@ class ProjectSession:
                 _source_head, source_raw = unpack_project(_source_payload)
         if source_raw is None:
             raise ValueError("source project snapshot is required for a song bundle")
+        if device_name(source_raw, source.suffix) != self.device:
+            raise ValueError("song bundles can only be imported between matching devices")
         source_patterns = {row[0] for row in get_song_rows(get_song_slots(source_raw)[source_slot])}
         if source_patterns != {src for src, _dst in pairs}:
             raise ValueError("map each distinct pattern used by the song exactly once")
@@ -1093,4 +1117,4 @@ class ProjectSession:
         return target
 
 
-__all__ = ["ProjectSession"]
+__all__ = ["ProjectSession", "staged_transaction"]

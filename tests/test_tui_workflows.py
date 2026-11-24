@@ -7,7 +7,7 @@ from unittest.mock import patch
 from dt_song_mgmt.session import ProjectSession
 from dt_song_mgmt.songs import get_song_rows, get_song_slots
 from dt_song_mgmt.tui import ConfirmModal, EntryModal, ProjectBrowser, ProjectPickerModal, SaveValidationModal, UnsavedExitModal
-from tests.test_project_integrity import write_fixture
+from tests.project_fixtures import write_fixture
 
 
 class TuiWorkflowTests(unittest.IsolatedAsyncioTestCase):
