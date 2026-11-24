@@ -1747,11 +1747,9 @@ class ProjectBrowser(App[None]):
         rows = self.songs[self.active_song_slot]["rows"]
         for index in indices:
             mute_mask = rows[index]["mute"] ^ (1 << (track - 1))
-            # update_row_fields writes big-endian; parsing reads little-endian.
-            stored_mask = ((mute_mask & 0xFF) << 8) | ((mute_mask >> 8) & 0xFF)
             self.session.stage({
                 "type": "update_rows", "slot": self.active_song_slot,
-                "rows": [index], "updates": {"mute_mask": stored_mask},
+                "rows": [index], "updates": {"mute_mask": mute_mask},
             })
         toggled_mask = rows[indices[0]]["mute"] ^ (1 << (track - 1))
         state = "muted" if toggled_mask & (1 << (track - 1)) else "unmuted"
