@@ -13,7 +13,8 @@ from dt_song_mgmt.constants import (
 )
 from dt_song_mgmt.dt2_samples import (
     EMPTY_POOL_ROW, SAMPLE_LOCKS_OFFSET, SAMPLE_LOCK_PARAM_ID,
-    SAMPLE_POOL_OFFSET, SAMPLE_POOL_ROW_COUNT, SOUND_BASE, SOUND_SAMPLE_SLOT_OFFSET,
+    SAMPLE_POOL_OFFSET, SAMPLE_POOL_ROW_COUNT, SOUND_BASE, SOUND_STRIDE,
+    SOUND_SAMPLE_HASH_OFFSET, SOUND_SAMPLE_SLOT_OFFSET,
 )
 from dt_song_mgmt.project import encode_project_name_field, pack_project
 from dt_song_mgmt.songs import get_song_slots, rename_song, set_song_rows, set_song_slots
@@ -53,13 +54,19 @@ def fixture_image(device, source=True):
     stride = kit_stride(raw)
     for index in (0, 1, 2):
         start = PATTERN_BASE + index * PATTERN_STRIDE
+        # Nonzero data throughout the pattern catches shortened block copies.
+        raw[start:start + PATTERN_STRIDE] = bytes([index + (1 if source else 51)]) * PATTERN_STRIDE
         raw[start:start + 4] = (3 if device == 'DN2' else 4).to_bytes(4, 'big')
-        raw[start + 4:start + 100] = bytes([index + (1 if source else 51)]) * 96
         name_start = start + pattern_name_offset(raw)
         raw[name_start:name_start + 16] = f'PATTERN {index}'.encode().ljust(16, b'\0')
         kit = KIT_BASE + index * stride
-        raw[kit + 8:kit + 40] = bytes([index + (17 if source else 71)]) * 32
+        # Cover every sound/track and unknown kit byte, not only its header.
+        raw[kit:kit + stride] = bytes([index + (17 if source else 71)]) * stride
         if device == 'DT2':
+            for track in range(16):
+                sound = kit + SOUND_BASE + track * SOUND_STRIDE
+                raw[sound + SOUND_SAMPLE_SLOT_OFFSET:sound + SOUND_SAMPLE_SLOT_OFFSET + 2] = bytes(2)
+                raw[sound + SOUND_SAMPLE_HASH_OFFSET:sound + SOUND_SAMPLE_HASH_OFFSET + 4] = bytes(4)
             selector = kit + SOUND_BASE + SOUND_SAMPLE_SLOT_OFFSET
             raw[selector:selector + 2] = (2).to_bytes(2, 'big')
     if source and device == 'DT2':
