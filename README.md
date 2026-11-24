@@ -115,3 +115,7 @@ Older arrangement-only JSON exports can still restore all songs and their row mu
 Run `python -m unittest discover -s tests -v` from the repository root after
 installing the project. See [Testing DSM](docs/TESTING.md) for coverage, focused
 commands, CI setup, and the remaining hardware checks.
+
+See [the beta milestone](TASKS.md) for completed acceptance checks and remaining
+device verification. Cross-project transfer failures restore both drafts and their
+undo/redo histories; each project is still saved separately.
